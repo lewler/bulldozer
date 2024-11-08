@@ -114,6 +114,7 @@ unwanted_files:
   - Rebroadcast
   - Re-run
   - Re-release
+  - Presenting
 
 # The premium networks to check for
 premium_networks:
@@ -201,6 +202,7 @@ force_uppercase:
 force_titlecase:
   - '^A$'
   - '^An$'
+  - '^As$'
   - '^At$'
   - '^In$'
   - '^The$'
