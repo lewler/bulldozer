@@ -199,10 +199,11 @@ force_uppercase:
 
 # When renaming files, anything matching these patterns will be title case
 force_titlecase:
-  - '^The$'
   - '^A$'
   - '^An$'
   - '^At$'
+  - '^In$'
+  - '^The$'
 
 # When renaming files, anything matching these patterns will be left untouched
 skip_capitalization:
