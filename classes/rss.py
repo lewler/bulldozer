@@ -6,7 +6,7 @@ import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from titlecase import titlecase
-from .utils import spinner, get_metadata_directory, log
+from .utils import spinner, get_metadata_directory, log, find_case_insensitive_files
 from .utils import special_capitalization, archive_metadata, ask_yes_no, announce
 
 class Rss:
@@ -29,14 +29,33 @@ class Rss:
         self.archive = config.get('archive_metadata', False)
         self.metadata = dict()
 
-    def get_file_path(self):
+    def default_file_path(self):
         """
-        Get the path to the RSS feed file.
+        Get the default path to the RSS feed file.
 
-        :return: The path to the RSS feed file.
+        :return: The default path to the RSS feed file.
         """
         file_name = 'podcast.rss' if self.podcast.name == 'unknown podcast' else f'{self.podcast.name}.rss'
         return get_metadata_directory(self.podcast.folder_path, self.config) / file_name
+
+    def get_file_path(self):
+        """
+        Get the path to the RSS feed file.
+        
+        :return: The path to the RSS feed file.
+        """
+        metadata_directory = get_metadata_directory(self.podcast.folder_path, self.config)
+        if not metadata_directory.exists():
+            return None
+        if self.default_file_path().exists():
+            return self.default_file_path()
+        rss_file = find_case_insensitive_files('*.rss', get_metadata_directory(self.podcast.folder_path, self.config))
+        if not rss_file:
+            return None
+        file_path = self.podcast.folder_path / rss_file[0].name
+        if not file_path.exists():
+            return None
+        return file_path
 
     def extract_folder_name_from(self):
         """
@@ -85,10 +104,10 @@ class Rss:
 
         :return: True if the metadata was successfully extracted, False otherwise.
         """
-        if not self.get_file_path().exists():
+        if not self.get_file_path():
             self.get_file()
 
-        if not self.get_file_path().exists():
+        if not self.get_file_path():
             log("RSS file could not be fetched", "error")
             return False
 
@@ -135,9 +154,9 @@ class Rss:
                 }
                 response = requests.get(self.source_rss_file, headers=headers)
                 response.raise_for_status()
-                with self.get_file_path().open('wb') as rss_file:
+                with self.default_file_path().open('wb') as rss_file:
                     rss_file.write(response.content)
-                log(f"RSS feed downloaded to {self.get_file_path()}", "debug")
+                log(f"RSS feed downloaded to {self.default_file_path()}", "debug")
                 spin.ok("✔")
             except requests.RequestException as e:
                 spin.fail("✘")
@@ -162,7 +181,7 @@ class Rss:
         if not self.source_rss_file:
             return False
         
-        self.get_file_path().parent.mkdir(parents=True, exist_ok=True)
+        self.default_file_path().parent.mkdir(parents=True, exist_ok=True)
 
         if os.path.exists(self.source_rss_file):
             self.source_rss_file = Path(self.source_rss_file).resolve()
@@ -211,7 +230,7 @@ class Rss:
         """
         Delete the RSS feed file.
         """
-        if not self.get_file_path().exists():
+        if not self.get_file_path():
             log("RSS file does not exist, can't be archived", "warning")
             return
         if self.archive:
@@ -220,11 +239,11 @@ class Rss:
         if self.censor_rss:
             censor_mode = self.config.get('rss_censor_mode', 'delete')
             if censor_mode == 'edit':
-                if self.get_file_path().exists():
+                if self.get_file_path():
                     self.edit_rss_feed()
                     log(f"RSS feed edited since censor was true: {self.get_file_path()}", "debug")
             else:
-                if self.get_file_path().exists():
+                if self.get_file_path():
                     self.get_file_path().unlink()
                     log(f"RSS feed deleted since censor was true: {self.get_file_path()}", "debug")
 
@@ -234,7 +253,7 @@ class Rss:
 
         :return: A string indicating the premium status of the podcast.
         """
-        if not self.get_file_path().exists():
+        if not self.get_file_path():
             log("RSS file does not exist, can't check for premium status", "warning")
             return ""
         tree = ET.parse(self.get_file_path())
@@ -262,8 +281,9 @@ class Rss:
         :param rss_feed_path: Path to the RSS feed XML file
         :return: List of episode titles in chronological order
         """
-        if not self.get_file_path().exists():
+        if not self.get_file_path():
             log("RSS file does not exist, can't fix episode numbering", "warning")
+            return []
         try:
             tree = ET.parse(self.get_file_path())
             root = tree.getroot()
