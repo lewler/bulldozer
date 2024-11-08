@@ -104,6 +104,10 @@ class Podnews:
             return None
 
         podcasts_div = results_container.find_next_sibling("div")
+        if not podcasts_div:
+            announce("No podcasts found at Podnews.", "info")
+            return None
+        
         all_links = podcasts_div.find_all("a", href=True)
         podcast_links = []
         for index, link in enumerate(all_links):
