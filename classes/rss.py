@@ -52,10 +52,7 @@ class Rss:
         rss_file = find_case_insensitive_files('*.rss', get_metadata_directory(self.podcast.folder_path, self.config))
         if not rss_file:
             return None
-        file_path = self.podcast.folder_path / rss_file[0].name
-        if not file_path.exists():
-            return None
-        return file_path
+        return rss_file[0]
 
     def extract_folder_name_from(self):
         """
