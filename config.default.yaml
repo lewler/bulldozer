@@ -31,6 +31,8 @@ cover_size: 800
 # The announce URL for the tracker
 announce_url: https://tracker.com/announce/thisismysecretkey
 
+tracker_source: placeholder
+
 # The API key to access the tracker
 api_key: andthisismyapikey
 
@@ -260,3 +262,4 @@ logfile_size_mb: 1
 
 # The number of log files to keep
 logfile_count: 5
+

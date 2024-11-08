@@ -3,7 +3,7 @@ from pathlib import Path
 from .utils import run_command, log, ask_yes_no
 
 class TorrentCreator:
-    def __init__(self, podcast, announce_url, base_dir):
+    def __init__(self, podcast, announce_url, base_dir, tracker_source):
         """
         Initialize the TorrentCreator with the podcast and announce URL.
 
@@ -16,6 +16,7 @@ class TorrentCreator:
         self.podcast = podcast
         self.announce_url = announce_url
         self.base_dir = base_dir
+        self.tracker_source = tracker_source
         if not self.base_dir:
             self.base_dir = self.podcast.folder_path.parent
         self.base_dir = Path(self.base_dir)
@@ -55,6 +56,6 @@ class TorrentCreator:
                 return
             log(f"Replacing torrent file: {torrent_file_path}", level="debug")
             torrent_file_path.unlink()
-        command = f'mktorrent -p -a {self.announce_url} -o "{torrent_file_path}" -l {piece_size} "{self.podcast.folder_path}"'
+        command = f'mktorrent -p -s {self.tracker_source} -a {self.announce_url} -o "{torrent_file_path}" -l {piece_size} "{self.podcast.folder_path}"'
         log(f"Creating torrent file: {torrent_file_path}", level="debug")
         run_command(command, progress_description="Creating torrent file")
