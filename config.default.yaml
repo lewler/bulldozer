@@ -225,7 +225,7 @@ censor_rss_patterns:
       - IGNORECASE
 
 # The pattern to match the episode number
-episode_pattern: '(Ep\.?|Episode)\s*(\d+)'
+episode_pattern: '(Ep\.?|Episode|E)\s*(\d+)'
 
 # the pattern to match date strings
 date_pattern: '\b(\d{4}-\d{2}-\d{2})\b'
