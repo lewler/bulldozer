@@ -54,7 +54,8 @@ def main(input, censor_rss, report_only=False, search_term=None):
 
     announce_url = config.get("announce_url", None)
     base_dir = config.get("base_dir", None)
-    create_torrent(podcast, announce_url, base_dir)
+    source_tracker = config.get("tracker_source", "_")
+    create_torrent(podcast, announce_url, base_dir, tracker_source)
 
     announce(f"All done, enjoy!", "celebrate")
 
