@@ -117,7 +117,7 @@ class FileOrganizer:
         """
         Pad episode numbers with zeros to make them consistent
         """
-        pattern = re.compile(self.config.get('episode_pattern', r'(Ep\.?|Episode)\s*(\d+)'), re.IGNORECASE)
+        pattern = re.compile(self.config.get('episode_pattern', r'(Ep\.?|Episode|E)\s*(\d+)'), re.IGNORECASE)
 
         files_with_episodes = []
 
@@ -138,7 +138,7 @@ class FileOrganizer:
             prefix = match.group(1)
             episode_number = int(match.group(2))
             padded_episode = str(episode_number).zfill(num_digits)
-            return f"{prefix} {padded_episode}"
+            return f"{prefix}{padded_episode}"
 
         for filename, _ in files_with_episodes:
             new_filename = pattern.sub(pad_episode_number, filename.name)
@@ -170,6 +170,8 @@ class FileOrganizer:
 
         files_without_episode_numbers = {}
         for date, files in files_by_date.items():
+            if len(files) == 1:
+                continue
             files_missing_episode = [
                 file for file in files if not episode_pattern.search(file.name)
             ]
@@ -222,11 +224,8 @@ class FileOrganizer:
     
         files = Path(self.podcast.folder_path).rglob('*')
         has_episode_number = any(pattern.match(f.name) for f in files)
-        
         if has_episode_number:
-                
             missing_episode_number = [f for f in files if not pattern.match(f.name)]
-            
             if missing_episode_number:
                 for f in missing_episode_number:
                     if (f.is_file() and not fnmatch.fnmatch(f.name, '*.mp3') and not fnmatch.fnmatch(f.name, '*.m4a')) or not f.is_file():
