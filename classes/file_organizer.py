@@ -24,7 +24,7 @@ class FileOrganizer:
         """
         Rename the episode files in the podcast folder.
         """
-        ep_nr_at_end_file_pattern = re.compile(self.config.get('ep_nr_at_end_file_pattern', r'^(.* - )(\d{4}-\d{2}-\d{2}) (.*?)( - )(\d+)\.mp3$'))
+        ep_nr_at_end_file_pattern = re.compile(self.config.get('ep_nr_at_end_file_pattern', r'^(.* - )(\d{4}-\d{2}-\d{2}) (.*?)( - )((Ep\.?|Episode|E)?\s*(\d+))(\.\w+)$'))
         for file_path in Path(self.podcast.folder_path).rglob('*'):
             if file_path.is_file():
                 self.rename_file(file_path, ep_nr_at_end_file_pattern)
@@ -71,18 +71,18 @@ class FileOrganizer:
         Fix the episode numbering in the file name.
 
         :param file_path: The path to the file.
-        :param ep_nr_at_end_file_pattern: The pattern to match episode numbers at the end of the file name.
+        :param ep_nr_at_end_file_pattern: The compiled pattern to match episode numbers at the end of the file name.
         """
         match = ep_nr_at_end_file_pattern.match(file_path.name)
         if match:
             prefix = match.group(1)
             date_part = match.group(2)
             title = match.group(3).rstrip(' -').strip()
-            last_number = match.group(5)
-            extension = match.group(6)
-            
-            new_filename = f"{prefix}{date_part} {last_number}. {title}{extension}"
+            episode_number = match.group(5)
+            extension = match.group(8)
+            new_filename = f"{prefix}{date_part} {episode_number} - {title}{extension}"
             new_path = file_path.with_name(new_filename)
+
             file_path.rename(new_path)
             file_path = new_path
 
@@ -117,14 +117,14 @@ class FileOrganizer:
         """
         Pad episode numbers with zeros to make them consistent
         """
-        pattern = re.compile(self.config.get('episode_pattern', r'(Ep\.?|Episode|E)\s*(\d+)'), re.IGNORECASE)
+        pattern = re.compile(self.config.get('episode_pattern', r'(Ep\.?|Episode|E)(\s*)(\d+)'), re.IGNORECASE)
 
         files_with_episodes = []
 
         for filename in Path(self.podcast.folder_path).rglob('*'):
             match = pattern.search(filename.name)
             if match:
-                episode_number = int(match.group(2))
+                episode_number = int(match.group(3))
                 files_with_episodes.append((filename, episode_number))
 
         if not files_with_episodes:
@@ -136,9 +136,10 @@ class FileOrganizer:
 
         def pad_episode_number(match):
             prefix = match.group(1)
-            episode_number = int(match.group(2))
+            space = match.group(2)
+            episode_number = int(match.group(3))
             padded_episode = str(episode_number).zfill(num_digits)
-            return f"{prefix}{padded_episode}"
+            return f"{prefix}{space}{padded_episode}"
 
         for filename, _ in files_with_episodes:
             new_filename = pattern.sub(pad_episode_number, filename.name)

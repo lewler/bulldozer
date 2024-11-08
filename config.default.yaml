@@ -184,7 +184,7 @@ date_format_long: '%B %d %Y'
 
 ## Patterns
 # The pattern to match the episode file
-ep_nr_at_end_file_pattern: '^(.* - )(\d{4}-\d{2}-\d{2}) (.*?)( - )(\d+)(\.\w+)$'
+ep_nr_at_end_file_pattern: '^(.* - )(\d{4}-\d{2}-\d{2}) (.*?)( - )((Ep\.?|Episode|E)?\s*(\d+))(\.\w+)$'
 
 # The pattern to match the episode file with a number
 numbered_episode_pattern: '^(.* - )(\d{4}-\d{2}-\d{2}) (\d+)\. (.*)(\.\w+)'
@@ -225,7 +225,7 @@ censor_rss_patterns:
       - IGNORECASE
 
 # The pattern to match the episode number
-episode_pattern: '(Ep\.?|Episode|E)\s*(\d+)'
+episode_pattern: '(Ep\.?|Episode|E)(\s*)(\d+)'
 
 # the pattern to match date strings
 date_pattern: '\b(\d{4}-\d{2}-\d{2})\b'
