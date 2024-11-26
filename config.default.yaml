@@ -43,6 +43,12 @@ dupecheck_url: https://tracker.com/api/torrents/filter
 # How the RSS feed should be censored. Can be 'delete', 'edit'
 rss_censor_mode: delete
 
+# Should the script offer to move the folder
+move:
+  active: false # Whether to move the folder
+  ask: false # Whether to ask before moving
+  path: /home/user/torrents # The path to move the folder to
+
 ## Cache settings
 cache:
   directory: /home/user/podcasts/cache # The directory to store the cache
@@ -227,6 +233,8 @@ title_replacements:
   - pattern: '[^\w\s-]'
     replacement: ''
   - pattern: '\s*-\s*$'
+    replacement: ''
+  - pattern: '\s_\s$'
     replacement: ''
 
 # Used when splitting the title to add episode numbers

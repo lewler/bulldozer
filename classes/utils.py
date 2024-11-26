@@ -493,3 +493,7 @@ def download_file(url, target_path):
         return False
     
     return True
+
+def fix_folder_name(name):
+    new_name = perform_replacements(name, config.get('title_replacements', [])).strip()
+    return titlecase(new_name, callback=lambda word, **kwargs: special_capitalization(word, config, None, **kwargs))

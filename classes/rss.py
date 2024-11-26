@@ -4,9 +4,8 @@ import os
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from titlecase import titlecase
 from .utils import spinner, get_metadata_directory, log, find_case_insensitive_files, copy_file, download_file
-from .utils import special_capitalization, archive_metadata, ask_yes_no, announce, perform_replacements
+from .utils import archive_metadata, ask_yes_no, announce, fix_folder_name
 
 class Rss:
     def __init__(self, podcast, source_rss_file, config, censor_rss):
@@ -65,8 +64,8 @@ class Rss:
         if channel is not None:
             title = channel.find('title')
             if title is not None:
-                new_title = perform_replacements(title.text, self.config.get('title_replacements', [])).strip()
-                return titlecase(new_title, callback=lambda word, **kwargs: special_capitalization(word, self.config, None, **kwargs))
+                return fix_folder_name(title.text)
+            
         return None 
 
     def get_episode_count_from(self):
