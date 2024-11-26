@@ -497,3 +497,21 @@ def download_file(url, target_path):
 def fix_folder_name(name):
     new_name = perform_replacements(name, config.get('title_replacements', [])).strip()
     return titlecase(new_name, callback=lambda word, **kwargs: special_capitalization(word, config, None, **kwargs))
+
+def rename_folder(podcast, name, spin=None):
+    new_folder_path = podcast.folder_path.parent / name
+    if new_folder_path.exists():
+        if spin:
+            spin.fail("✖")
+        log(f"Folder {new_folder_path} already exists", "critical")
+        if not ask_yes_no("Folder already exists, do you want to overwrite it?"):
+            announce("Exiting, cya later!", "info")
+            exit(1)
+        if spin:
+            spin = spinner("Renaming folder")
+        shutil.rmtree(new_folder_path)
+
+    podcast.folder_path.rename(new_folder_path)
+    log(f"Folder renamed to {new_folder_path}", "debug")
+    podcast.folder_path = new_folder_path
+    podcast.name = name
