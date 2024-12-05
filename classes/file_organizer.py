@@ -321,9 +321,9 @@ class FileOrganizer:
             log("Skipping split check, podcast is marked as complete", "debug")
             return
         
-        full_years_only = self.config.get('full_years_only', False)
-        if not full_years_only:
-            log("Skipping split check, full_years_only is false", "debug")
+        split = self.config.get('split', False)
+        if not split:
+            log("Skipping split check, split is false", "debug")
             return
 
         start_year = int(self.podcast.analyzer.earliest_year)
