@@ -1,6 +1,5 @@
 # file_organizer.py
 import fnmatch
-import mutagen
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -314,8 +313,10 @@ class FileOrganizer:
     def check_split(self):
         """
         Check if the podcast is active, and if it is and spans multiple years,
-        split it into multiple folders -- one folder from the start up until the
-        last full year, and another folder for the current year.
+        split it into multiple folders based on the split mode.
+        
+        If split is "last_full_year", split into a "--CURRENT--" folder for the current year.
+        If split is "yearly", create one folder per year with the year appended inside parentheses.
         """
         if self.podcast.completed:
             log("Skipping split check, podcast is marked as complete", "debug")
@@ -334,40 +335,88 @@ class FileOrganizer:
             log("Skipping split check, podcast does not span multiple years", "debug")
             return
 
-        current_folder = self.podcast.folder_path.parent / f"{self.podcast.name} --CURRENT--"
+        if split == "last_full_year":
+            current_folder = self.podcast.folder_path.parent / f"{self.podcast.name} --CURRENT--"
 
-        if current_folder.exists():
-            log(f"Current year folder '{current_folder}' already exists", "debug")
-            if not ask_yes_no(f"'{current_folder.name}' already exists, proceed with split anyway?"):
-                log("Skipping split check, user chose not to proceed - folder exists", "debug")
-                return
-    
-        if not current_folder.exists():
-            current_folder.mkdir()
+            if current_folder.exists():
+                log(f"Current year folder '{current_folder}' already exists", "debug")
+                if not ask_yes_no(f"'{current_folder.name}' already exists, proceed with split anyway?"):
+                    log("Skipping split check, user chose not to proceed - folder exists", "debug")
+                    return
         
-        for date, year_list in self.podcast.analyzer.file_dates.items():
-            year = int(date[:4])
-            if year == current_year:
-                for file_path in year_list[:]:
-                    if not file_path.exists():
-                        log(f"File '{file_path}' does not exist", "debug")
-                        continue
-                    new_path = current_folder / file_path.name
-                    if new_path.exists():
-                        log(f"File '{new_path}' already exists", "debug")
-                        if not ask_yes_no(f"'{new_path.name}' already exists, overwritet?"):
-                            log("Skipping file", "debug")
+            if not current_folder.exists():
+                current_folder.mkdir()
+            
+            for date, year_list in self.podcast.analyzer.file_dates.items():
+                year = int(date[:4])
+                if year == current_year:
+                    for file_path in year_list[:]:
+                        if not file_path.exists():
+                            log(f"File '{file_path}' does not exist", "debug")
                             continue
-                        log("Deleting file", "debug")
-                        new_path.unlink()
+                        new_path = current_folder / file_path.name
+                        if new_path.exists():
+                            log(f"File '{new_path}' already exists", "debug")
+                            if not ask_yes_no(f"'{new_path.name}' already exists, overwrite?"):
+                                log("Skipping file", "debug")
+                                continue
+                            log("Deleting file", "debug")
+                            new_path.unlink()
 
-                    file_path.rename(new_path)
-                    log(f"Moved '{file_path}' to '{new_path}'", "debug")
-                    self.podcast.analyzer.remove_file(file_path)
+                        file_path.rename(new_path)
+                        log(f"Moved '{file_path}' to '{new_path}'", "debug")
+                        self.podcast.analyzer.remove_file(file_path)
 
-        self.duplicate_metadata(current_folder)
+            self.duplicate_metadata(current_folder)
+            announce(f"Podcast split into two folders, current year is in folder appended with --CURRENT--", "info")
+        
+        elif split == "yearly":
+            new_name = f"{self.podcast.name} ({start_year})"
+            new_folder_path = self.podcast.folder_path.parent / new_name
+            self.podcast.folder_path.rename(new_folder_path)
+            self.podcast.folder_path = new_folder_path
+            log(f"Renamed original folder to '{new_name}'", "debug")
 
-        announce(f"Podcast split into two folders, current year is in folder appended with --CURRENT--", "info")
+            self.podcast.analyze_files()
+
+            for year in range(start_year + 1, last_year + 1):
+                year_folder = self.podcast.folder_path.parent / f"{self.podcast.name} ({year})"
+
+                if year_folder.exists():
+                    log(f"Year folder '{year_folder}' already exists", "debug")
+                    if not ask_yes_no(f"'{year_folder.name}' already exists, proceed with split anyway?"):
+                        log("Skipping split check, user chose not to proceed - folder exists", "debug")
+                        continue
+
+                if not year_folder.exists():
+                    year_folder.mkdir()
+
+                for date, year_list in self.podcast.analyzer.file_dates.items():
+                    file_year = int(date[:4])
+                    if file_year == year:
+                        for file_path in year_list[:]:
+                            if not file_path.exists():
+                                log(f"File '{file_path}' does not exist", "debug")
+                                continue
+                            new_path = year_folder / file_path.name
+                            if new_path.exists():
+                                log(f"File '{new_path}' already exists", "debug")
+                                if not ask_yes_no(f"'{new_path.name}' already exists, overwrite?"):
+                                    log("Skipping file", "debug")
+                                    continue
+                                log("Deleting file", "debug")
+                                new_path.unlink()
+
+                            file_path.rename(new_path)
+                            log(f"Moved '{file_path}' to '{new_path}'", "debug")
+                            self.podcast.analyzer.remove_file(file_path)
+
+            announce(f"Podcast split into folder for year {start_year}", "info")
+
+            for year in range(start_year + 1, last_year + 1):
+                year_folder = self.podcast.folder_path.parent / f"{self.podcast.name} ({year})"
+                self.duplicate_metadata(year_folder)
+                announce(f"Podcast split into folder for year {year}", "info")
     
     def duplicate_metadata(self, new_folder):
         self.podcast.metadata.duplicate(new_folder)
