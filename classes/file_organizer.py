@@ -390,40 +390,75 @@ class FileOrganizer:
 
     def rename_folder(self):
         """
-        Rename the podcast folder based on the podcast name and last episode date.
+        Rename the podcast folder based on the podcast name and date information.
         """
         if '(' in self.podcast.folder_path.name:
             return
+
         date_format_short = self.config.get('date_format_short', '%Y-%m-%d')
         date_format_long = self.config.get('date_format_long', '%B %d %Y')
+        completed_threshold_days = self.config.get('completed_threshold_days', 365)
+
+        # Get date strings and handle None or "Unknown"
         start_year_str = str(self.podcast.analyzer.earliest_year) if self.podcast.analyzer.earliest_year else "Unknown"
         real_start_year_str = str(self.podcast.analyzer.real_first_episode_date)[:4] if self.podcast.analyzer.real_first_episode_date else "Unknown"
-        first_episode_date_str = format_last_date(self.podcast.analyzer.first_episode_date, date_format_long) if self.podcast.analyzer.first_episode_date else "Unknown"
-        last_episode_date_str = format_last_date(self.podcast.analyzer.last_episode_date, date_format_long) if self.podcast.analyzer.last_episode_date else "Unknown"
-        last_episode_date_dt = datetime.strptime(self.podcast.analyzer.last_episode_date, date_format_short) if self.podcast.analyzer.last_episode_date != "Unknown" else None
-        real_last_episode_date_dt = datetime.strptime(self.podcast.analyzer.real_last_episode_date, date_format_short) if self.podcast.analyzer.real_last_episode_date != "Unknown" else None
+        first_episode_date_str = format_last_date(self.podcast.analyzer.first_episode_date, date_format_long) if self.podcast.analyzer.first_episode_date and self.podcast.analyzer.first_episode_date != "Unknown" else "Unknown"
+        last_episode_date_str = format_last_date(self.podcast.analyzer.last_episode_date, date_format_long) if self.podcast.analyzer.last_episode_date and self.podcast.analyzer.last_episode_date != "Unknown" else "Unknown"
+
+        # Initialize datetime objects
+        last_episode_date_dt = None
+        real_last_episode_date_dt = None
+
+        # Safely parse last_episode_date
+        if self.podcast.analyzer.last_episode_date and self.podcast.analyzer.last_episode_date != "Unknown":
+            try:
+                last_episode_date_dt = datetime.strptime(self.podcast.analyzer.last_episode_date, date_format_short)
+            except ValueError:
+                log(f"Invalid last_episode_date format: {self.podcast.analyzer.last_episode_date}", "warning")
+                last_episode_date_dt = None
+
+        # Safely parse real_last_episode_date
+        if self.podcast.analyzer.real_last_episode_date and self.podcast.analyzer.real_last_episode_date != "Unknown":
+            try:
+                real_last_episode_date_dt = datetime.strptime(self.podcast.analyzer.real_last_episode_date, date_format_short)
+            except ValueError:
+                log(f"Invalid real_last_episode_date format: {self.podcast.analyzer.real_last_episode_date}", "warning")
+                real_last_episode_date_dt = None
+
         last_year_str = str(last_episode_date_dt.year) if last_episode_date_dt else "Unknown"
         new_folder_name = None
-        if real_last_episode_date_dt != last_episode_date_dt:
-            if ask_yes_no(f'Would you like to rename the folder to {self.podcast.name} ({start_year_str}-{last_year_str})'):
-                new_folder_name = f"{self.podcast.name} ({start_year_str}-{last_year_str})"
-        if not new_folder_name and start_year_str != real_start_year_str:
-            if ask_yes_no(f'Would you like to rename the folder to {self.podcast.name} ({first_episode_date_str}-{last_episode_date_str})'):
-                new_folder_name = f"{self.podcast.name} ({first_episode_date_str}-{last_episode_date_str})"
-        if not new_folder_name and last_episode_date_dt and datetime.now() - last_episode_date_dt > timedelta(days=self.config.get('completed_threshold_days', 365)):
-            if ask_yes_no(f'Would you like to rename the folder to {self.podcast.name} (Complete)'):
-                new_folder_name = f"{self.podcast.name} (Complete)"
+
+        # Decision logic for renaming the folder
+        if real_last_episode_date_dt and last_episode_date_dt and real_last_episode_date_dt != last_episode_date_dt:
+            prompt_name = f"{self.podcast.name} ({start_year_str}-{last_year_str})"
+            if ask_yes_no(f'Would you like to rename the folder to {prompt_name}?'):
+                new_folder_name = prompt_name
+
+        if not new_folder_name and start_year_str != real_start_year_str and first_episode_date_str != "Unknown" and last_episode_date_str != "Unknown":
+            prompt_name = f"{self.podcast.name} ({first_episode_date_str}-{last_episode_date_str})"
+            if ask_yes_no(f'Would you like to rename the folder to {prompt_name}?'):
+                new_folder_name = prompt_name
+
+        if not new_folder_name and last_episode_date_dt and (datetime.now() - last_episode_date_dt > timedelta(days=completed_threshold_days)):
+            prompt_name = f"{self.podcast.name} (Complete)"
+            if ask_yes_no(f'Would you like to rename the folder to {prompt_name}?'):
+                new_folder_name = prompt_name
                 self.podcast.completed = True
+
+        if not new_folder_name and start_year_str != "Unknown" and last_episode_date_str != "Unknown":
+            prompt_name = f"{self.podcast.name} ({start_year_str}-{last_episode_date_str})"
+            if ask_yes_no(f'Would you like to rename the folder to {prompt_name}?'):
+                new_folder_name = prompt_name
+
         if not new_folder_name:
-            if ask_yes_no(f'Would you like to rename the folder to {self.podcast.name} ({start_year_str}-{last_episode_date_str})'):
-                new_folder_name = f"{self.podcast.name} ({start_year_str}-{last_episode_date_str})"
-        if not new_folder_name:
-            new_folder_name = take_input(f'Enter a custom name for the folder (blank skips)')
+            custom_name = take_input(f'Enter a custom name for the folder (blank skips): ')
+            if custom_name:
+                new_folder_name = custom_name
 
         if new_folder_name:
             new_folder_path = self.podcast.folder_path.parent / new_folder_name
-            log(f"Renaming folder {self.podcast.folder_path} to {new_folder_path}", "debug")
+            log(f"Renaming folder '{self.podcast.folder_path}' to '{new_folder_path}'", "debug")
             self.podcast.folder_path.rename(new_folder_path)
             self.podcast.folder_path = new_folder_path
-        
+
         return
