@@ -3,6 +3,7 @@ yaspin
 requests
 mutagen
 titlecase
+python-dateutil
 pyyaml
 pillow
 pillow-avif-plugin

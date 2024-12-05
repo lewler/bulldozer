@@ -4,9 +4,8 @@ import os
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from titlecase import titlecase
 from .utils import spinner, get_metadata_directory, log, find_case_insensitive_files, copy_file, download_file
-from .utils import special_capitalization, archive_metadata, ask_yes_no, announce, perform_replacements
+from .utils import archive_metadata, ask_yes_no, announce, fix_folder_name, rename_folder
 
 class Rss:
     def __init__(self, podcast, source_rss_file, config, censor_rss):
@@ -65,8 +64,8 @@ class Rss:
         if channel is not None:
             title = channel.find('title')
             if title is not None:
-                new_title = perform_replacements(title.text, self.config.get('title_replacements', [])).strip()
-                return titlecase(new_title, callback=lambda word, **kwargs: special_capitalization(word, self.config, None, **kwargs))
+                return fix_folder_name(title.text)
+            
         return None 
 
     def get_episode_count_from(self):
@@ -87,9 +86,9 @@ class Rss:
         """
         Rename the RSS file to the podcast name.
         """
-        old_file_path = get_metadata_directory(self.podcast.folder_path, self.config) / f'podcast.rss'
-        if not old_file_path.exists():
-            log(f"RSS file {old_file_path} does not exist, can't rename", "error")
+        old_file_path = self.get_file_path()
+        if not old_file_path:
+            log(f"RSS file {old_file_path} does not exist, can't rename", "warning")
             return
         new_file_path = get_metadata_directory(self.podcast.folder_path, self.config) / f'{self.podcast.name}.rss'
         log(f"Renaming RSS file from {old_file_path} to {new_file_path}", "debug")
@@ -116,20 +115,7 @@ class Rss:
                 exit(1)
 
             if self.podcast.name == 'unknown podcast':
-                new_folder_path = self.podcast.folder_path.parent / f'{self.metadata['name']}'
-                if new_folder_path.exists():
-                    spin.fail("✖")
-                    log(f"Folder {new_folder_path} already exists", "critical")
-                    if not ask_yes_no("Folder already exists, do you want to overwrite it?"):
-                        announce("Exiting, cya later!", "info")
-                        exit(1)
-
-                    shutil.rmtree(new_folder_path)
-
-                self.podcast.folder_path.rename(new_folder_path)
-                log(f"Folder renamed to {new_folder_path}", "debug")
-                self.podcast.folder_path = new_folder_path
-                self.podcast.name = self.metadata['name']
+                rename_folder(self.podcast, self.metadata['name'], spin)
                 self.rename()
             
             self.metadata['total_episodes'] = self.get_episode_count_from()

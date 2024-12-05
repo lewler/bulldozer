@@ -7,7 +7,8 @@ from pathlib import Path
 from classes.dupe_checker import DupeChecker
 from classes.podcast import Podcast
 from classes.torrent_creator import TorrentCreator
-from classes.utils import load_config, setup_logging, announce, ask_yes_no, check_config, log
+from classes.utils import load_config, setup_logging, announce, ask_yes_no, check_config, log, fix_folder_name
+from classes.utils import rename_folder
 from classes.report import Report
 
 config = load_config()
@@ -20,7 +21,7 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
     :param censor_rss: Whether to censor the RSS feed or not
     """
     global config
-    print("· • —– ++ ---| Bulldozer v0.6.3 |--- ++ —– • ·")
+    print("· • —– ++ ---| Bulldozer v0.6.4 |--- ++ —– • ·")
     database_active = config.get("database", {}).get("active", True)
 
     if os.path.isdir(input):
@@ -29,6 +30,11 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
             name = folder_path.name
         check_duplicates = not report_only
         podcast = Podcast(name, folder_path, config, censor_rss=censor_rss, check_duplicates=check_duplicates, search_term=search_term)
+        new_name = fix_folder_name(name)
+        if new_name != name and ask_yes_no(f"Would you like to rename the folder to {new_name}"):
+            rename_folder(podcast, new_name)
+            podcast.name = name = new_name
+            podcast.rss.rename()
     else:
         source_rss_file = input
         output_dir = config.get("output_dir", ".")
@@ -86,6 +92,21 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
     tracker_source = config.get("tracker_source", None)
     create_torrent(podcast, announce_url, base_dir, tracker_source)
     podcast.db.close()
+    move_folder = config.get("move", {}).get("active", False)
+    move_folder_path = config.get("move", {}).get("path", None)
+    if move_folder and move_folder_path:
+        ask_to_move = config.get("move", {}).get("ask", True)
+        if ask_to_move and ask_yes_no(f"Would you like to move the folder to {move_folder_path}"):
+            move_folder_path = Path(move_folder_path)
+            if move_folder_path.exists() and move_folder_path.is_dir():
+                new_folder_path = move_folder_path / folder_path.name
+                if new_folder_path.exists():
+                    announce(f"Folder {new_folder_path} already exists, skipping move", "warning")
+                else:
+                    folder_path.rename(new_folder_path)
+                    announce(f"Moved folder to {new_folder_path}", "info")
+            else:
+                announce(f"Move folder {move_folder_path} does not exist", "error")
     announce(f"All done, enjoy!", "celebrate")
 
 def check_files(input):
