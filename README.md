@@ -22,6 +22,7 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 - Required Python packages (listed in `requirements.txt`)
 - mktorrent
 - podcast-dl 10.3.1+
+- ffmpeg
 
 ## Installation
 
