@@ -116,10 +116,10 @@ To get started, first install [Docker Desktop](https://www.docker.com/products/d
 To run interactively, you'll want to construct a command like this: 
 
 ```
-docker run --pull newer -it --rm -v ./config.yaml:/usr/bulldozer/config.yaml -v ~/temp_podcasts/:/output/podcasts/ ghcr.io/lewler/bulldozer:main /bin/bash
+docker run --pull always -it --rm -v ./config.yaml:/usr/bulldozer/config.yaml -v ~/temp_podcasts/:/output/podcasts/ ghcr.io/lewler/bulldozer:main /bin/bash
 ```
 Explanation: 
-- [`--pull always`](https://docs.docker.com/reference/cli/docker/container/run/#pull) tries to pull updates to the image.
+- [`--pull always`](https://docs.docker.com/reference/cli/docker/container/run/#pull) tries to pull updates to the image. 
 - `-it` and `/bin/bash` in the command drop you into a shell inside the container. This is useful because bulldozer requires interaction. If you leave these off, the default command will validate your config. 
 - [`--rm`](https://docs.docker.com/reference/cli/docker/container/run/#rm) automatically cleans up the container when it exits. This is a good default or docker has a habit of filling up your hard drive.
 - [`-v`](https://docs.docker.com/reference/cli/docker/container/run/#volume) mounts the volume following the pattern `/path/on/your/computer/:/path/on/container/`.
