@@ -107,6 +107,27 @@ chmod +x bulldozer
 - `--name`: Use <input> as the podcast name.
 - `--match-titles`: Will only keep episodes matching <input> in the feed.
 
+## Running With Docker
+
+Docker should allow you to run bulldozer on mac or without installing all the native dependencies. This is a quick guide assuming you're new to docker. 
+
+To get started, first install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+
+To run interactively, you'll want to construct a command like this: 
+
+```
+docker run --pull newer -it --rm -v ./config.yaml:/usr/bulldozer/config.yaml -v ~/temp_podcasts/:/output/podcasts/ ghcr.io/tradition550/bulldozer:main /bin/bash
+```
+Explanation: 
+- [`--pull newer`](https://docs.docker.com/reference/cli/docker/container/run/#pull) tries to pull updates to the image.
+- `-it` and `/bin/bash` in the command drop you into a shell inside the container. This is useful because bulldozer requires interaction. If you leave these off, the default command will validate your config. 
+- [`--rm`](https://docs.docker.com/reference/cli/docker/container/run/#rm) automatically cleans up the container when it exits. This is a good default or docker has a habit of filling up your hard drive.
+- [`-v`](https://docs.docker.com/reference/cli/docker/container/run/#volume) mounts the volume following the pattern `/path/on/your/computer/:/path/on/container/`.
+    - `/path/to/config.yaml:/usr/bulldozer/config.yaml` is required in order to pass your local bulldozer config.
+    - `~/temp_podcasts/:/output/podcasts/` can be whatever you want. Note: the path you specify in your config is the path in the container not the host!
+- `ghcr.io/tradition550/bulldozer:main` is the name for the image. `main` will automatically update when new versions are released. The short commit sha should also work as a tag. (TODO change to lewler repo)
+
+
 ## Project Structure
 
 - bulldozer: Main script
