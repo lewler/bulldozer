@@ -3,6 +3,7 @@
 # bulldozer
 import os
 import argparse
+import shutil
 from pathlib import Path
 from classes.dupe_checker import DupeChecker
 from classes.podcast import Podcast
@@ -21,7 +22,7 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
     :param censor_rss: Whether to censor the RSS feed or not
     """
     global config
-    print("· • —– ++ ---| Bulldozer v0.6.4 |--- ++ —– • ·")
+    print("· • —– ++ ---| Bulldozer v0.6.5 |--- ++ —– • ·")
     database_active = config.get("database", {}).get("active", True)
 
     if os.path.isdir(input):
@@ -99,11 +100,11 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
         if ask_to_move and ask_yes_no(f"Would you like to move the folder to {move_folder_path}"):
             move_folder_path = Path(move_folder_path)
             if move_folder_path.exists() and move_folder_path.is_dir():
-                new_folder_path = move_folder_path / folder_path.name
+                new_folder_path = move_folder_path / podcast.folder_path.name
                 if new_folder_path.exists():
                     announce(f"Folder {new_folder_path} already exists, skipping move", "warning")
                 else:
-                    folder_path.rename(new_folder_path)
+                    shutil.move(str(podcast.folder_path), str(new_folder_path))
                     announce(f"Moved folder to {new_folder_path}", "info")
             else:
                 announce(f"Move folder {move_folder_path} does not exist", "error")
