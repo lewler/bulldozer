@@ -138,14 +138,16 @@ def load_config():
         log("Failed to load base config file.", "error")
         return None
     
-    try:
-        with open(user_config_file, 'r') as user_file:
-            user_config = yaml.safe_load(user_file)
-    except FileNotFoundError:
-        log("'config.yaml' not found, will only use defaults.", "debug")
-        user_config = {}
+    if user_config_file.exists():
+        try:
+            with open(user_config_file, 'r') as user_file:
+                user_config = yaml.safe_load(user_file)
+        except FileNotFoundError:
+            log("'config.yaml' could not be loaded.", "error")
+            user_config = {}
 
-    deep_merge(base_config, user_config)
+        deep_merge(base_config, user_config)
+        
     config = base_config
 
     return config
