@@ -1,7 +1,7 @@
 # report.py
 from collections import Counter
 from pathlib import Path
-from .utils import spinner, log, format_last_date, ask_yes_no, take_input
+from .utils import spinner, log, format_last_date, take_input
 from .report_template import ReportTemplate
 
 class Report:
