@@ -92,6 +92,7 @@ podchaser:
     - categories:
       - title
   url: https://api.podchaser.com/graphql # The Podchaser API URL
+  limit: 25 # The number of podcasts to retrieve at a time
   formatters: # The formatters to apply to the data
     - property: description # The property to format
       method: limit_line_length # The method to apply
