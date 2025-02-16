@@ -22,7 +22,7 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
     :param censor_rss: Whether to censor the RSS feed or not
     """
     global config
-    print("· • —– ++ ---| Bulldozer v0.6.5 |--- ++ —– • ·")
+    print("· • —– ++ ---| Bulldozer v0.6.6 |--- ++ —– • ·")
     database_active = config.get("database", {}).get("active", True)
 
     if os.path.isdir(input):
@@ -171,6 +171,10 @@ def dupecheck(input):
 
     :param input: The name to dupecheck
     """
+    dupecheck = config.get("dupecheck", False)
+    if not dupecheck:
+        announce("Dupecheck is not enabled in the config", "info")
+        return
     api_key = config.get("api_key")
     dupecheck_url = config.get("dupecheck_url")
     

@@ -13,6 +13,7 @@ class Cache:
         The Cache class is responsible for caching data to reduce the number of requests.
         """
         self.config = config
+        self.cache_active = self.config.get('cache', {}).get('active', False)
         self.cache_hours = self.config.get('cache', {}).get('hours', 24)
         self.cache_directory = self.config.get('cache', {}).get('directory', None)
         if self.cache_directory:
@@ -27,7 +28,7 @@ class Cache:
         """
         from .utils import announce, log
 
-        if not self.cache_directory:
+        if not self.cache_active or not self.cache_directory:
             return False
         if not self.cache_directory.exists():
             try:
@@ -117,7 +118,7 @@ class Cache:
         """
         Clear the cache.
         """
-        if not self.cache_directory:
+        if not self.cache_active or not self.cache_directory:
             return False
         for file in self.cache_directory.iterdir():
             file.unlink()

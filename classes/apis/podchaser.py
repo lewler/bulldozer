@@ -4,12 +4,14 @@ import json
 from ..utils import spinner, log, announce, ask_yes_no, get_from_cache, write_to_cache
 
 class Podchaser:
-    def __init__(self, token, fields, url):
+    def __init__(self, token, fields, url, limit):
         """
         Initialize the Podchaser API with the token and fields.
 
         :param token: The token to use for the API.
         :param fields: The fields to use for the query.
+        :param url: The URL of the API.
+        :param limit: The limit of results to return.
 
         The Podchaser class is responsible for querying the Podchaser API.
         """
@@ -17,6 +19,7 @@ class Podchaser:
         self.results = None
         self.fields = fields
         self.url = url
+        self.limit = limit
 
     def build_fields(self, fields, indent_level=7):
         """
@@ -60,7 +63,7 @@ class Podchaser:
                 fields_query = self.build_fields(self.fields)
                 query = f"""
                     query Podcasts($searchTerm: String!) {{
-                        podcasts(searchTerm: $searchTerm) {{
+                        podcasts(searchTerm: $searchTerm first: {self.limit}) {{
                             paginatorInfo {{
                                 currentPage
                                 hasMorePages
