@@ -171,6 +171,10 @@ def dupecheck(input):
 
     :param input: The name to dupecheck
     """
+    dupecheck = config.get("dupecheck", False)
+    if not dupecheck:
+        announce("Dupecheck is not enabled in the config", "info")
+        return
     api_key = config.get("api_key")
     dupecheck_url = config.get("dupecheck_url")
     
