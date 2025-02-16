@@ -34,6 +34,9 @@ announce_url: https://tracker.com/announce/thisismysecretkey
 # Source tag to add to the torrent
 tracker_source: null
 
+# Should we dupecheck the releases?
+dupecheck = false
+
 # The API key to access the tracker
 api_key: andthisismyapikey
 
@@ -51,6 +54,7 @@ move:
 
 ## Cache settings
 cache:
+  active: false # Whether to use the cache
   directory: /home/user/podcasts/cache # The directory to store the cache
   hours: 24 # The number of hours to keep the cache
 
