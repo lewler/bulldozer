@@ -35,7 +35,7 @@ announce_url: https://tracker.com/announce/thisismysecretkey
 tracker_source: null
 
 # Should we dupecheck the releases?
-dupecheck = false
+dupecheck: false
 
 # The API key to access the tracker
 api_key: andthisismyapikey
