@@ -55,7 +55,7 @@ class Podcast:
         metadata = self.rss.get_metadata_rename_folder()
 
         if not metadata and critical:
-            announce("Failed to get metadata from RSS feed", "critical")
+            announce("Failed to get metadata from RSS feed, make sure the feed validates", "critical")
             exit(1)
         elif not metadata:
             return metadata
