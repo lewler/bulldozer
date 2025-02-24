@@ -108,7 +108,13 @@ class Rss:
             return False
 
         with spinner("Getting metadata from feed") as spin:
-            self.metadata['name'] = self.extract_folder_name()
+            try:
+                self.metadata['name'] = self.extract_folder_name()
+            except ET.ParseError as e:
+                log(f"RSS feed can't be parsed, probably malformed, exiting", "critical")
+                log(e, "debug")
+                spin.fail("✖")
+                return False
             if not self.metadata['name']:
                 spin.fail("✖")
                 log("Failed to extract name from RSS feed", "critical")
