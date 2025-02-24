@@ -111,13 +111,11 @@ class Rss:
             try:
                 self.metadata['name'] = self.extract_folder_name()
             except ET.ParseError as e:
-                log(f"RSS feed can't be parsed, probably malformed, exiting", "critical")
                 log(e, "debug")
                 spin.fail("✖")
                 return False
             if not self.metadata['name']:
                 spin.fail("✖")
-                log("Failed to extract name from RSS feed", "critical")
                 exit(1)
 
             if self.podcast.name == 'unknown podcast':
