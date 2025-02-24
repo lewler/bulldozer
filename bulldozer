@@ -22,7 +22,7 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
     :param censor_rss: Whether to censor the RSS feed or not
     """
     global config
-    print("· • —– ++ ---| Bulldozer v0.6.6 |--- ++ —– • ·")
+    print("· • —– ++ ---| Bulldozer v0.6.7 |--- ++ —– • ·")
     database_active = config.get("database", {}).get("active", True)
 
     if os.path.isdir(input):
@@ -44,6 +44,12 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
             temp_dir = Path(output_dir) / 'download_temp'
         else:
             temp_dir = Path(output_dir) / f"{name}"
+        if temp_dir.exists():
+            if ask_yes_no(f"The directory where the podcast will be downloaded already exists. Would you like to delete it?"):
+                shutil.rmtree(temp_dir)
+            else:
+                announce(f"Exiting. Please check {temp_dir} and remove it to continue.", "info")
+                return
         temp_dir.mkdir(parents=True, exist_ok=True)
         podcast = Podcast(name, temp_dir, config, source_rss_file, censor_rss, True, search_term, match_titles)
         podcast.download_episodes()
