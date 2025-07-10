@@ -14,7 +14,7 @@ from classes.report import Report
 
 config = load_config()
 
-def main(input, censor_rss, report_only=False, search_term=None, download_only=False, refresh=False, name=None, match_titles=None):
+def main(input, censor_rss, report_only=False, search_term=None, download_only=False, refresh=False, name=None, match_titles=None, after_date=None, before_date=None, threads=None, latest_episode_only=False):
     """
     Main function to run the bulldozer script
 
@@ -51,8 +51,8 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
                 announce(f"Exiting. Please check {temp_dir} and remove it to continue.", "info")
                 return
         temp_dir.mkdir(parents=True, exist_ok=True)
-        podcast = Podcast(name, temp_dir, config, source_rss_file, censor_rss, True, search_term, match_titles)
-        podcast.download_episodes()
+        podcast = Podcast(name, temp_dir, config, source_rss_file, censor_rss, True, search_term, match_titles, after_date, before_date, latest_episode_only)
+        podcast.download_episodes(threads)
         name = podcast.name
         folder_path = temp_dir
 
@@ -202,6 +202,10 @@ if __name__ == "__main__":
     parser.add_argument("--search-term", type=str, help="Search term to use when querying APIs")
     parser.add_argument("--name", type=str, help="Override the name to use for the podcast")
     parser.add_argument("--match-titles", type=str, help="Only includes the episodes with titles matching the given string")
+    parser.add_argument("--after", type=str, help="Only include episodes published after this date (YYYY-MM-DD format)")
+    parser.add_argument("--before", type=str, help="Only include episodes published before this date (YYYY-MM-DD format)")
+    parser.add_argument("--threads", type=int, help="Number of threads to use for podcast-dl downloading (overrides config setting)")
+    parser.add_argument("--latest-episode-only", action="store_true", help="Only download the latest episode")
     args = parser.parse_args()
 
     if not config:
@@ -221,4 +225,4 @@ if __name__ == "__main__":
     elif args.check_config:
         check_config()
     else:
-        main(args.input, args.censor_rss, args.report_only, args.search_term, args.download_only, args.refresh, args.name, args.match_titles)
+        main(args.input, args.censor_rss, args.report_only, args.search_term, args.download_only, args.refresh, args.name, args.match_titles, args.after, args.before, args.threads, args.latest_episode_only)

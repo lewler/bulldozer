@@ -167,6 +167,88 @@ class Rss:
         with self.get_file_path().open('w') as rss_file:
             rss_file.write(ET.tostring(root, encoding='utf-8').decode('utf-8'))
     
+    def filter_by_date(self):
+        """
+        Filter episodes by publication date using --after and --before arguments.
+        """
+        if not self.get_file_path():
+            log("RSS file does not exist, can't filter by date", "error")
+            return
+            
+        if not self.podcast.after_date and not self.podcast.before_date and not self.podcast.latest_episode_only:
+            log("No date filters provided, not filtering episodes", "debug")
+            return
+            
+        import datetime
+        
+        after_date = None
+        before_date = None
+        
+        if self.podcast.after_date:
+            try:
+                after_date = datetime.datetime.strptime(self.podcast.after_date, '%Y-%m-%d')
+                log(f"Filtering episodes after: {self.podcast.after_date}", "debug")
+            except ValueError:
+                log(f"Invalid date format for --after: {self.podcast.after_date}. Use YYYY-MM-DD format.", "error")
+                return
+                
+        if self.podcast.before_date:
+            try:
+                before_date = datetime.datetime.strptime(self.podcast.before_date, '%Y-%m-%d')
+                log(f"Filtering episodes before: {self.podcast.before_date}", "debug")
+            except ValueError:
+                log(f"Invalid date format for --before: {self.podcast.before_date}. Use YYYY-MM-DD format.", "error")
+                return
+        
+        tree = ET.parse(self.get_file_path())
+        root = tree.getroot()
+        channel = root.find('channel')
+        if channel is not None:
+            items = channel.findall('item')
+            removed_count = 0
+            
+            # Handle latest episode only filter
+            if self.podcast.latest_episode_only:
+                log("Filtering to keep only the latest episode", "info")
+                if len(items) > 1:
+                    # Keep only the first item (latest episode)
+                    for item in items[1:]:
+                        channel.remove(item)
+                        removed_count += 1
+                    log(f"Removed {removed_count} episodes, keeping only the latest", "info")
+                    with self.get_file_path().open('w') as rss_file:
+                        rss_file.write(ET.tostring(root, encoding='utf-8').decode('utf-8'))
+                return
+            
+            for item in items:
+                pubdate_element = item.find('pubDate')
+                if pubdate_element is not None and pubdate_element.text:
+                    try:
+                        import email.utils
+                        pub_timestamp = email.utils.parsedate_to_datetime(pubdate_element.text)
+                        pub_date = pub_timestamp.replace(tzinfo=None)
+                        
+                        should_remove = False
+                        
+                        if after_date and pub_date <= after_date:
+                            should_remove = True
+                            
+                        if before_date and pub_date >= before_date:
+                            should_remove = True
+                            
+                        if should_remove:
+                            channel.remove(item)
+                            removed_count += 1
+                            
+                    except (ValueError, TypeError) as e:
+                        log(f"Could not parse publication date: {pubdate_element.text}", "debug")
+                        continue
+                        
+            if removed_count > 0:
+                log(f"Removed {removed_count} episodes based on date filters", "info")
+                with self.get_file_path().open('w') as rss_file:
+                    rss_file.write(ET.tostring(root, encoding='utf-8').decode('utf-8'))
+
     def load_local_file(self):
         """
         Load the local RSS feed file.
@@ -193,6 +275,7 @@ class Rss:
             self.download_file()
 
         self.check_titles()
+        self.filter_by_date()
     
     def edit_rss_feed(self):
         """
