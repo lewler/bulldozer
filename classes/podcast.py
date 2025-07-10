@@ -12,7 +12,7 @@ from .utils import log, run_command, announce, spinner, get_metadata_directory, 
 from .database import Database
 
 class Podcast:
-    def __init__(self, name, folder_path, config, source_rss_file=None, censor_rss=False, check_duplicates=True, search_term=None, match_titles=None):
+    def __init__(self, name, folder_path, config, source_rss_file=None, censor_rss=False, check_duplicates=True, search_term=None, match_titles=None, after_date=None, before_date=None, latest_episode_only=False):
         """
         Initialize the Podcast with the name, folder path, configuration, and source RSS file.
 
@@ -38,6 +38,9 @@ class Podcast:
             self.downloaded = True
         self.search_term = search_term
         self.match_titles = match_titles
+        self.after_date = after_date
+        self.before_date = before_date
+        self.latest_episode_only = latest_episode_only
         self.rss = Rss(self, source_rss_file, self.config, censor_rss)
         self.image = PodcastImage(self, self.config)
         self.metadata = PodcastMetadata(self, self.config)
@@ -55,7 +58,7 @@ class Podcast:
         metadata = self.rss.get_metadata_rename_folder()
 
         if not metadata and critical:
-            announce("Failed to get metadata from RSS feed", "critical")
+            announce("Failed to get metadata from RSS feed, make sure the feed validates", "critical")
             exit(1)
         elif not metadata:
             return metadata
@@ -63,7 +66,7 @@ class Podcast:
         if self.name == 'unknown podcast':
             self.name = self.rss.metadata['name']
 
-    def download_episodes(self):
+    def download_episodes(self, threads_override=None):
         """
         Download the podcast episodes using podcast-dl.
         """
@@ -71,7 +74,7 @@ class Podcast:
         self.check_for_duplicates()
 
         episode_template = self.config.get("podcast_dl", {}).get('episode_template', "{{podcast_title}} - {{release_year}}-{{release_month}}-{{release_day}} {{title}}")
-        threads = self.config.get("podcast_dl", {}).get("threads", 1)
+        threads = threads_override if threads_override is not None else self.config.get("podcast_dl", {}).get("threads", 1)
 
         command = (
             f'podcast-dl --file "{self.rss.get_file_path()}" --out-dir "{self.folder_path}" '

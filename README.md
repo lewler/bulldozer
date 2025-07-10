@@ -21,7 +21,6 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 - Python 3.12.0+
 - Required Python packages (listed in `requirements.txt`)
 - mktorrent
-- podcast-dl 10.3.1+
 - ffmpeg
 
 ## Installation
@@ -42,12 +41,17 @@ Bulldozer is a script designed to automate the process of downloading, organizin
     sudo apt-get install libwebp-dev libavif-dev
     ```
 
-4. Create your own config file, and add the things you need to override:
+4. Install podcast-dl:
+    ```sh
+    curl -L "$(curl -s https://api.github.com/repos/lightpohl/podcast-dl/releases/latest | yq -r '.assets[] | select(.name | test("linux-x64$")) | .browser_download_url')" -o ~/.local/bin/podcast-dl && chmod +x ~/.local/bin/podcast-dl
+    ```
+
+5. Create your own config file, and add the things you need to override:
     ```sh
     touch config.yaml
     ```
 
-5. If you want to use the Podchaser API you will need a token, which is free up to 25k points per month.
+6. If you want to use the Podchaser API you will need a token, which is free up to 25k points per month.
 
 ## Configuration
 
@@ -106,6 +110,10 @@ chmod +x bulldozer
 - `--search-term`: Use <input> as search term instead of podcast name.
 - `--name`: Use <input> as the podcast name.
 - `--match-titles`: Will only keep episodes matching <input> in the feed.
+- `--after`: Will only keep episodes released after <input> in the feed (YYYY-MM-DD).
+- `--before`: Will only keep episodes released before <input> in the feed (YYYY-MM-DD).
+- `--latest-episode-only`: Will only keep the newest episode in the feed.
+- `--threads`: Overrides the setting in config.yaml for the number of threads podcast-dl uses.
 
 ## Running With Docker
 
