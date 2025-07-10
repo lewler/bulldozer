@@ -110,6 +110,10 @@ chmod +x bulldozer
 - `--search-term`: Use <input> as search term instead of podcast name.
 - `--name`: Use <input> as the podcast name.
 - `--match-titles`: Will only keep episodes matching <input> in the feed.
+- `--after`: Will only keep episodes released after <input> in the feed (YYYY-MM-DD).
+- `--before`: Will only keep episodes released before <input> in the feed (YYYY-MM-DD).
+- `--latest-episode-only`: Will only keep the newest episode in the feed.
+- `--threads`: Overrides the setting in config.yaml for the number of threads podcast-dl uses.
 
 ## Running With Docker
 
