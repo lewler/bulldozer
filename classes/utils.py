@@ -166,7 +166,7 @@ def setup_logging(log_level, config=None):
     logfile_size_mb = config.get("logfile_size_mb", 1)
     logfile_count = config.get("logfile_count", 5)
     handler = RotatingFileHandler(
-        "logs/podshare.log",
+        "logs/bulldozer.log",
         maxBytes=logfile_size_mb * 1024 * 1024,
         backupCount=logfile_count
     )
