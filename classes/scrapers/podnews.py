@@ -17,7 +17,14 @@ class Podnews:
         :return: The data from the site.
         """
         with spinner(f"Getting data from Podnews") as spin:
-            response = requests.get(url)
+            cookies = {
+                "human": "true"
+            }
+
+            headers = {
+                "User-Agent": "Mozilla/5.0"
+            }
+            response = requests.get(url, cookies=cookies, headers=headers)
             if response.status_code != 200:
                 spin.fail('✖')
                 log(f"Podnews scraping failed with status code {response.status_code}", "error")
@@ -103,7 +110,7 @@ class Podnews:
             announce("No podcasts found at Podnews.", "info")
             return None
 
-        podcasts_div = results_container.find_next_sibling("div")
+        podcasts_div = results_container.find_next("div", style=lambda v: v and "grid" in v)
         if not podcasts_div:
             announce("No podcasts found at Podnews.", "info")
             return None
