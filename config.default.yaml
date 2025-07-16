@@ -13,6 +13,9 @@ temp_dir_name: temp_download
 # Whether to include metadata in the upload
 include_metadata: true
 
+# Whether to run mediainfo on a random file and include it in the report
+include_mediainfo: true
+
 # The directory where metadata is stored
 metadata_directory: Metadata
 

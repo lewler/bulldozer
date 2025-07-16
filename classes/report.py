@@ -203,6 +203,10 @@ class Report:
                 for site, external_data in self.podcast.metadata.external_data.items():
                     data[site] = external_data
 
+                # Add mediainfo output if available
+                if self.podcast.analyzer.mediainfo_output:
+                    data['mediainfo'] = self.podcast.analyzer.mediainfo_output
+
             log(f"Data passed to the template: {data}", "debug")
 
             with open(output_filename, 'w') as f:

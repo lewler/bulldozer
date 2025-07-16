@@ -23,6 +23,9 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 - mktorrent
 - ffmpeg
 
+### Optional Requirements
+- mediainfo
+
 ## Installation
 
 1. Clone the repository:
