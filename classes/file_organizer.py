@@ -432,6 +432,10 @@ class FileOrganizer:
         with spinner("Organizing episode files") as spin:
             self.rename_files()
             spin.ok("✔")
+        
+        # Run mediainfo on renamed files if enabled
+        if self.config.get('include_mediainfo', True):
+            self.podcast.analyzer.run_mediainfo()
 
         self.find_unwanted_files()
         self.check_numbering()

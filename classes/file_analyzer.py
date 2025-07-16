@@ -63,11 +63,6 @@ class FileAnalyzer:
             # sort self.file_dates
             self.file_dates = dict(sorted(self.file_dates.items()))
             self.get_date_range()
-            
-            # Run mediainfo if enabled in config
-            if self.config.get('include_mediainfo', True):
-                self.run_mediainfo()
-            
             spin.ok("✔")
 
     def analyze_audio_file(self, file_path, trailer_patterns):
@@ -389,11 +384,20 @@ class FileAnalyzer:
                                   capture_output=True, text=True, timeout=30)
             
             if result.returncode == 0:
+                # Create relative path: parent_folder/filename
+                relative_path = f"{random_file.parent.name}/{random_file.name}"
+                
+                # Replace the full path in mediainfo output with relative path
+                cleaned_output = result.stdout.replace(str(random_file), relative_path)
+                
+                # Strip extra newlines from the output
+                cleaned_output = cleaned_output.strip()
+                
                 self.mediainfo_output = {
-                    'file': random_file.name,
-                    'output': result.stdout
+                    'file': relative_path,
+                    'output': cleaned_output
                 }
-                log(f"mediainfo analysis completed on {random_file.name}", "debug")
+                log(f"mediainfo analysis completed on {relative_path}", "debug")
             else:
                 log(f"mediainfo failed with return code {result.returncode}: {result.stderr}", "error")
                 
