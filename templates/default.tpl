@@ -14,6 +14,12 @@ Tags: {% for category in podcastindex.categories.values() %}{{ category | lower 
 Tags: {{ tags }}
 {% endif %}
 
+{%- if mediainfo %}
+
+MediaInfo analysis of {{ mediainfo.file }}:
+{{ mediainfo.output }}
+{%- endif %}
+
 --- Torrent Description ---
 
 [center]

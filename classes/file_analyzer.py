@@ -2,6 +2,8 @@
 
 import mutagen
 import re
+import random
+import subprocess
 from collections import defaultdict
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -32,6 +34,7 @@ class FileAnalyzer:
         self.first_episode_date = None
         self.real_first_episode_date = None
         self.original_files = None
+        self.mediainfo_output = None
 
     def analyze_files(self):
         """
@@ -351,6 +354,57 @@ class FileAnalyzer:
                 log(f"Removed date list path: {file_path}", "debug")
 
         self.get_date_range()
+
+    def run_mediainfo(self):
+        """
+        Run mediainfo on a random audio file in the folder and store the output.
+        """
+        audio_files = []
+        for file_path in self.podcast.folder_path.iterdir():
+            if file_path.suffix.lower() in ['.mp3', '.m4a']:
+                audio_files.append(file_path)
+        
+        if not audio_files:
+            log("No audio files found for mediainfo analysis", "warning")
+            return
+        
+        # Select a random file
+        random_file = random.choice(audio_files)
+        
+        try:
+            # Check if mediainfo is available
+            result = subprocess.run(['which', 'mediainfo'], 
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                log("mediainfo not installed, skipping mediainfo analysis", "info")
+                return
+            
+            # Run mediainfo on the random file
+            result = subprocess.run(['mediainfo', str(random_file)], 
+                                  capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                # Create relative path: parent_folder/filename
+                relative_path = f"{random_file.parent.name}/{random_file.name}"
+                
+                # Replace the full path in mediainfo output with relative path
+                cleaned_output = result.stdout.replace(str(random_file), relative_path)
+                
+                # Strip extra newlines from the output
+                cleaned_output = cleaned_output.strip()
+                
+                self.mediainfo_output = {
+                    'file': relative_path,
+                    'output': cleaned_output
+                }
+                log(f"mediainfo analysis completed on {relative_path}", "debug")
+            else:
+                log(f"mediainfo failed with return code {result.returncode}: {result.stderr}", "error")
+                
+        except subprocess.TimeoutExpired:
+            log("mediainfo command timed out", "error")
+        except Exception as e:
+            log(f"Error running mediainfo: {e}", "error")
 
     def update_file_path(self, old_path, new_path):
         """
