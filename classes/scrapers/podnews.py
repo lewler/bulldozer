@@ -51,14 +51,13 @@ class Podnews:
 
         return data
     
-    def get_data_for_selected_podcast(self, selected_podcast):
+    def get_data_for_selected_podcast(self, selected_podcast, name):
         """
         Get the data for the selected podcast.
 
         :param selected_podcast: The selected podcast object.
         :return: The data for the selected podcast.
         """
-        name = selected_podcast['name']
         url = selected_podcast['url']
         key = f"podnews-details-{name.lower().replace(' ', '_')}.json"
         log(f"Getting details for '{name}' at {url}", "debug")
@@ -150,7 +149,7 @@ class Podnews:
             announce("No podcast selected.", "info")
             return None
         
-        return self.get_data_for_selected_podcast(selected_podcast)
+        return self.get_data_for_selected_podcast(selected_podcast, name)
 
             
             
