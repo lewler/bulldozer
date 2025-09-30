@@ -126,7 +126,7 @@ class Podcast:
             if not self.config.get('include_metadata', False):
                 metadata_directory = get_metadata_directory(self.folder_path, self.config)
                 if metadata_directory.exists():
-                    metadata_directory.rmdir()
+                    shutil.rmtree(metadata_directory)
             spin.ok("✔")
 
     def cleanup_and_exit(self):
