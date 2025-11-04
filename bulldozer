@@ -132,7 +132,10 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
         announce(f"📁 Podcast folder: {podcast.folder_path}", "info")
         
         # Show episode count
-        episode_count = len(podcast.analyzer.original_files) if hasattr(podcast.analyzer, 'original_files') else 'unknown'
+        if hasattr(podcast, 'analyzer') and podcast.analyzer and hasattr(podcast.analyzer, 'original_files') and podcast.analyzer.original_files is not None:
+            episode_count = len(podcast.analyzer.original_files)
+        else:
+            episode_count = 'unknown'
         announce(f"📊 Episodes: {episode_count}", "info")
         
         print("=" * 70 + "\n")
