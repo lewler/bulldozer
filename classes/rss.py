@@ -100,32 +100,45 @@ class Rss:
 
         :return: True if the metadata was successfully extracted, False otherwise.
         """
+        log("Starting metadata extraction from RSS feed", "info")
         if not self.get_file_path():
+            log("RSS file path not found, attempting to get RSS file", "info")
             self.get_file()
 
-        if not self.get_file_path():
+        rss_file_path = self.get_file_path()
+        if not rss_file_path:
             log("RSS file could not be fetched", "error")
             return False
+        log(f"RSS file found at: {rss_file_path}", "info")
 
         with spinner("Getting metadata from feed") as spin:
             try:
+                log("Extracting folder name from RSS feed", "info")
                 self.metadata['name'] = self.extract_folder_name()
+                log(f"Extracted folder name: {self.metadata.get('name', 'None')}", "info")
             except ET.ParseError as e:
-                log(e, "debug")
+                log(f"XML ParseError occurred while extracting folder name: {str(e)}", "info")
+                log(f"ParseError details: {e}", "debug")
                 spin.fail("✖")
                 return False
             if not self.metadata['name']:
+                log("Failed to extract folder name from RSS feed - name is None or empty", "error")
                 spin.fail("✖")
                 exit(1)
 
             if self.podcast.name == 'unknown podcast':
+                log(f"Podcast name was 'unknown podcast', renaming folder to: {self.metadata['name']}", "info")
                 rename_folder(self.podcast, self.metadata['name'], spin)
                 self.rename()
             
+            log("Getting episode count from RSS feed", "info")
             self.metadata['total_episodes'] = self.get_episode_count_from()
+            log(f"Total episodes found: {self.metadata['total_episodes']}", "info")
+            log("Checking for premium show status", "info")
             self.check_for_premium_show()
             spin.ok("✔")
 
+        log("Metadata extraction completed successfully", "info")
         return True
 
     def download_file(self):
