@@ -70,22 +70,36 @@ class Podcast:
         """
         Download the podcast episodes using podcast-dl.
         """
+        log(f"Starting episode download for podcast: {self.name}", "info")
         self.get_metadata()
+        log(f"Metadata retrieved, total episodes: {self.rss.metadata.get('total_episodes', 'unknown')}", "info")
         self.check_for_duplicates()
+        log(f"Duplicate check completed, proceeding with download", "info")
 
         episode_template = self.config.get("podcast_dl", {}).get('episode_template', "{{podcast_title}} - {{release_year}}-{{release_month}}-{{release_day}} {{title}}")
         threads = threads_override if threads_override is not None else self.config.get("podcast_dl", {}).get("threads", 1)
+        log(f"Using episode template: {episode_template}", "info")
+        log(f"Using {threads} thread(s) for download", "info")
 
+        rss_file_path = self.rss.get_file_path()
+        log(f"RSS file path: {rss_file_path}", "info")
+        log(f"Output directory: {self.folder_path}", "info")
+        
         command = (
-            f'podcast-dl --file "{self.rss.get_file_path()}" --out-dir "{self.folder_path}" '
+            f'podcast-dl --file "{rss_file_path}" --out-dir "{self.folder_path}" '
             f'--episode-template "{episode_template}" '
             f'--include-meta --threads {threads} --add-mp3-metadata'
         )
+        log(f"Executing podcast-dl command", "info")
         download_output, return_code = run_command(command, progress_description="Downloading podcast episodes", track_progress=True, total_episodes=self.rss.metadata['total_episodes'])
+        log(f"podcast-dl command completed with return code: {return_code}", "info")
         if return_code != 0:
             log("Failed to download episodes using podcast-dl.", "error")
+            log(f"Command return code: {return_code}", "info")
+            log(f"Command output (first 1000 chars): {download_output[:1000]}", "info")
             log(download_output, "debug")
             exit(1)
+        log(f"Episode download completed successfully", "info")
 
     def organize_files(self):
         """
@@ -108,12 +122,16 @@ class Podcast:
         """
         if self.config.get('api_key') and self.config.get('dupecheck_url'):
             term = self.search_term if self.search_term else self.name
+            log(f"Checking for duplicates using term: '{term}'", "info")
             dupe_checker = DupeChecker(term, self.config.get('dupecheck_url'), self.config.get('api_key'))
             progress = dupe_checker.check_duplicates()
             if not progress:
+                log("User chose not to continue after duplicate check", "info")
                 self.cleanup_and_exit()
+            else:
+                log("Duplicate check completed, user chose to continue", "info")
         else:
-            log("Skipping duplicate check because 'api_key' or 'dupecheck_url' is not set in the config.", "debug")
+            log("Skipping duplicate check because 'api_key' or 'dupecheck_url' is not set in the config.", "info")
 
     def archive_files(self):
         """

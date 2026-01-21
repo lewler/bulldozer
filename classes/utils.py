@@ -6,6 +6,8 @@ import re
 import shutil
 import fnmatch
 import requests
+import platform
+import os
 from datetime import datetime
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,6 +15,17 @@ from yaspin import yaspin
 from titlecase import titlecase
 from logging.handlers import RotatingFileHandler
 from .cache import Cache
+
+# Global state to track if user selected "yes to all"
+_yes_to_all = False
+
+def reset_yes_to_all():
+    """
+    Reset the "yes to all" flag to False.
+    This should be called after file overwrite sections are complete.
+    """
+    global _yes_to_all
+    _yes_to_all = False
 
 def run_command(command, progress_description=None, track_progress=False, total_episodes=None):
     """
@@ -26,22 +39,55 @@ def run_command(command, progress_description=None, track_progress=False, total_
     :return: The output of the command and the return code.
     """
     output = []
-    episode_count = -1
-    log(f"Running command: {command}", level="debug")
-    with spinner(progress_description) as spin:
-        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        for line in iter(process.stdout.readline, b''):
-            if line:
-                decoded_line = line.decode('utf-8').strip()
-                output.append(decoded_line)
-                if track_progress and "Download complete" in decoded_line:
-                    episode_count += 1
-                    spin.text = f"{progress_description} ({episode_count}/{total_episodes})"
-        process.wait()
-        if process.returncode == 0:
-            spin.ok("✔")
-        else:
-            spin.fail("✖")
+    episode_count = 0
+    completed_episodes = set()  # Track unique episode numbers/completions to avoid double counting
+    log(f"Running command: {command}", "info")
+    if progress_description:
+        log(f"Progress description: {progress_description}", "info")
+    if track_progress and total_episodes:
+        log(f"Tracking progress for {total_episodes} episodes", "info")
+    try:
+        with spinner(progress_description) as spin:
+            process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            log(f"Command process started with PID: {process.pid}", "info")
+            for line in iter(process.stdout.readline, b''):
+                if line:
+                    decoded_line = line.decode('utf-8', errors='replace').strip()
+                    output.append(decoded_line)
+                    # Log each line at DEBUG level for detailed output visibility
+                    log(f"Command output: {decoded_line}", "debug")
+                    if track_progress and "Download complete" in decoded_line:
+                        # Only count episode downloads (lines with [N] pattern), not image downloads
+                        # The [N] pattern indicates an episode download, not just any download
+                        if re.search(r'\[\d+\]', decoded_line):
+                            # The [N] in podcast-dl output is a thread/batch identifier, not episode number
+                            # Count each unique "Download complete" line to track actual episode completions
+                            # Use the full line as a key to avoid counting the same episode twice
+                            line_hash = hash(decoded_line)
+                            if line_hash not in completed_episodes:
+                                completed_episodes.add(line_hash)
+                                episode_count = len(completed_episodes)
+                                spin.text = f"{progress_description} ({episode_count}/{total_episodes})"
+                                log(f"Download progress: {episode_count}/{total_episodes} episodes complete", "info")
+            process.wait()
+            log(f"Command process completed with return code: {process.returncode}", "info")
+            
+            # Log full output at DEBUG level for debugging
+            if output:
+                full_output = '\n'.join(output)
+                log(f"Command full output ({len(output)} lines):\n{full_output}", "debug")
+            
+            if process.returncode == 0:
+                spin.ok("✔")
+            else:
+                spin.fail("✖")
+                log(f"Command failed with return code: {process.returncode}", "info")
+                if output:
+                    log(f"Command output (last 10 lines): {chr(10).join(output[-10:])}", "info")
+    except Exception as e:
+        log(f"Exception occurred while running command: {type(e).__name__}: {str(e)}", "info")
+        log(f"Exception details: {e}", "debug")
+        raise
     return '\n'.join(output), process.returncode
 
 @contextmanager
@@ -165,22 +211,31 @@ def setup_logging(log_level, config=None):
     
     logfile_size_mb = config.get("logfile_size_mb", 1)
     logfile_count = config.get("logfile_count", 5)
-    handler = RotatingFileHandler(
+    file_handler = RotatingFileHandler(
         "logs/bulldozer.log",
         maxBytes=logfile_size_mb * 1024 * 1024,
         backupCount=logfile_count
     )
     
     config_log_level = config.get("log_level", "WARNING").upper()
-    effective_log_level = log_level if log_level else config_log_level
+    effective_log_level = log_level.upper() if log_level else config_log_level
     
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
     
     root_logger = logging.getLogger()
     root_logger.setLevel(effective_log_level)
+    
+    # Add console handler if DEBUG or INFO level is set
     if not root_logger.hasHandlers():
-        root_logger.addHandler(handler)
+        root_logger.addHandler(file_handler)
+        # Add console handler for INFO and above when DEBUG/INFO level is set
+        if effective_log_level in ['DEBUG', 'INFO']:
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.INFO if effective_log_level == 'INFO' else logging.DEBUG)
+            console_formatter = logging.Formatter('%(levelname)s - %(message)s')
+            console_handler.setFormatter(console_formatter)
+            root_logger.addHandler(console_handler)
     
     log(f"Log level set to {effective_log_level}", "debug")
 
@@ -224,16 +279,31 @@ def announce(text, type=None):
         prepend = "🎉"
     print(f"{prepend}{text}")
 
-def ask_yes_no(question):
+def ask_yes_no(question, allow_all=False):
     """
     Ask a yes/no question.
 
     :param question: The question to ask.
+    :param allow_all: If True, allows "A" option to answer "yes" to all subsequent file overwrite prompts.
     :return: True if the answer is yes, False otherwise.
     """
+    global _yes_to_all
+    
+    # Only auto-answer if this is a file overwrite prompt (allow_all=True) AND user selected "A" previously
+    # This ensures "yes to all" only applies to file overwrite prompts, not other prompts
+    if _yes_to_all and allow_all:
+        log(f"Auto-answering 'yes' to file overwrite prompt (allow_all=True)", "debug")
+        return True
+    
+    prompt_suffix = " (y/N/A for all)" if allow_all else " (y/N)"
+    
     while True:
-        response = input(f"❓{question} (y/N): ").strip().lower()
+        response = input(f"❓{question}{prompt_suffix}: ").strip().lower()
         if response == 'y':
+            return True
+        elif response == 'a' and allow_all:
+            _yes_to_all = True
+            announce("All subsequent file overwrite prompts will be answered 'yes'", "info")
             return True
         else:
             return False
@@ -496,6 +566,70 @@ def download_file(url, target_path):
     
     return True
 
+def check_and_install_podcast_dl():
+    """
+    Check if podcast-dl command exists.
+    
+    :return: True if podcast-dl is available, False otherwise.
+    """
+    log("Checking if podcast-dl is available...", "info")
+    
+    # Check if podcast-dl already exists
+    podcast_dl_path = shutil.which('podcast-dl')
+    if podcast_dl_path:
+        log(f"podcast-dl found at: {podcast_dl_path}", "info")
+        return True
+    
+    log("podcast-dl not found", "error")
+    announce("podcast-dl is not installed. Please install it manually:", "error")
+    
+    system = platform.system().lower()
+    if system == 'linux':
+        announce("  For Linux:", "info")
+        announce("    curl -L \"$(curl -s https://api.github.com/repos/lightpohl/podcast-dl/releases/latest | grep -o 'https://[^\"]*linux-x64')\" -o ~/.local/bin/podcast-dl && chmod +x ~/.local/bin/podcast-dl", "info")
+        announce("  Or via npm:", "info")
+        announce("    npm install -g podcast-dl", "info")
+    elif system == 'darwin':  # macOS
+        announce("  For macOS:", "info")
+        announce("    npm install -g podcast-dl", "info")
+        announce("  Or via Homebrew:", "info")
+        announce("    brew install podcast-dl", "info")
+    else:
+        announce("  Please visit: https://github.com/lightpohl/podcast-dl for installation instructions", "info")
+    
+    return False
+
+def check_and_install_mktorrent():
+    """
+    Check if mktorrent command exists.
+    
+    :return: True if mktorrent is available, False otherwise.
+    """
+    log("Checking if mktorrent is available...", "info")
+    
+    # Check if mktorrent already exists
+    mktorrent_path = shutil.which('mktorrent')
+    if mktorrent_path:
+        log(f"mktorrent found at: {mktorrent_path}", "info")
+        return True
+    
+    log("mktorrent not found", "error")
+    announce("mktorrent is not installed. Please install it manually:", "error")
+    
+    system = platform.system().lower()
+    if system == 'linux':
+        announce("  For Debian/Ubuntu:", "info")
+        announce("    sudo apt-get update && sudo apt-get install -y mktorrent", "info")
+        announce("  For RHEL/CentOS/Fedora:", "info")
+        announce("    sudo yum install mktorrent  # or sudo dnf install mktorrent", "info")
+    elif system == 'darwin':  # macOS
+        announce("  For macOS:", "info")
+        announce("    brew install mktorrent", "info")
+    else:
+        announce("  Please visit: https://github.com/Rudde/mktorrent for installation instructions", "info")
+    
+    return False
+
 def fix_folder_name(name):
     new_name = perform_replacements(name, config.get('title_replacements', [])).strip()
     return titlecase(new_name, callback=lambda word, **kwargs: special_capitalization(word, config, None, **kwargs))
@@ -506,7 +640,7 @@ def rename_folder(podcast, name, spin=None):
         if spin:
             spin.fail("✖")
         log(f"Folder {new_folder_path} already exists", "critical")
-        if not ask_yes_no("Folder already exists, do you want to overwrite it?"):
+        if not ask_yes_no(f"Folder {new_folder_path} already exists, do you want to overwrite it?"):
             announce("Exiting, cya later!", "info")
             exit(1)
         if spin:

@@ -71,7 +71,8 @@ split: last_full_year
 # The Podchaser API settings
 podchaser: 
   active: false # Whether to use the Podchaser API
-  token: null # The Podchaser API token
+  client_id: null # The Podchaser API client ID
+  client_secret: null # The Podchaser API client secret
   fields: # The fields to retrieve from the API
     - id
     - title
@@ -345,4 +346,3 @@ logfile_size_mb: 1
 
 # The number of log files to keep
 logfile_count: 5
-
