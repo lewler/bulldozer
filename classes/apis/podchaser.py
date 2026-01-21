@@ -31,12 +31,22 @@ class Podchaser:
         self.cache_directory = Path(cache_directory) if cache_directory else None
 
     def get_token_cache_path(self):
+        """
+        Get the path to the token cache file.
+        
+        :return: The path to the token cache file.
+        """
         if self.cache_directory:
             self.cache_directory.mkdir(parents=True, exist_ok=True)
             return self.cache_directory / self.TOKEN_CACHE_KEY
         return Path(self.TOKEN_CACHE_KEY)
 
     def load_cached_token(self):
+        """
+        Load the cached token from the cache file.
+
+        :return: The cached token data or None if not found or invalid.
+        """
         cache_path = self.get_token_cache_path()
         if not cache_path.exists():
             return None
@@ -49,6 +59,12 @@ class Podchaser:
         return data
 
     def save_cached_token(self, token, expires_at):
+        """
+        Save the token to the cache file.
+
+        :param token: The access token.
+        :param expires_at: The expiration timestamp of the token.
+        """
         cache_path = self.get_token_cache_path()
         payload = {
             "access_token": token,
@@ -56,7 +72,20 @@ class Podchaser:
         }
         cache_path.write_text(json.dumps(payload, indent=4))
 
+    def invalidate_cached_token(self):
+        """
+        Invalidate the cached token by deleting the cache file.
+        """
+        cache_path = self.get_token_cache_path()
+        if cache_path.exists():
+            cache_path.unlink()
+
     def get_access_token(self):
+        """
+        Get the access token, either from cache or by requesting a new one.
+
+        :return: The access token or None if failed.
+        """
         cached = self.load_cached_token()
         if cached and cached.get("expires_at", 0) > int(time.time()):
             return cached.get("access_token")
@@ -149,14 +178,6 @@ class Podchaser:
         :return: The data from the API.
         """
         with spinner(f"Searching for podcast {name} on Podchaser") as spin:
-                token = self.get_access_token()
-                if not token:
-                    spin.fail('✖')
-                    return None
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {token}"
-                }
                 fields_query = self.build_fields(self.fields)
                 query = f"""
                     query Podcasts($searchTerm: String!) {{
@@ -175,20 +196,53 @@ class Podchaser:
                 variables = {
                     "searchTerm": name
                 }
-
                 payload = {
                     "query": query,
                     "variables": variables,
                 }
 
-                response = requests.post(self.url, json=payload, headers=headers)
+                def run_request():
+                    token = self.get_access_token()
+                    if not token:
+                        return None, None
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {token}"
+                    }
+                    return requests.post(self.url, json=payload, headers=headers), token
+
+                response, _ = run_request()
+                if response is None:
+                    spin.fail('✖')
+                    return None
+
+                if response.status_code == 401:
+                    self.invalidate_cached_token()
+                    response, _ = run_request()
+
+                if response is None:
+                    spin.fail('✖')
+                    return None
+
                 if response.status_code == 200:
                     data = response.json()
                     if 'errors' in data:
-                        log(f"Podchaser query failed with errors", "error")
-                        log(data['errors'], "debug")
-                        spin.fail('✖')
-                        return None
+                        errors_text = json.dumps(data.get('errors', []))
+                        if "invalid" in errors_text.lower() or "unauthorized" in errors_text.lower():
+                            self.invalidate_cached_token()
+                            response, _ = run_request()
+                            if response and response.status_code == 200:
+                                data = response.json()
+                            else:
+                                log(f"Podchaser query failed after refreshing token", "error")
+                                log(response.text if response else "No response", "debug")
+                                spin.fail('✖')
+                                return None
+                        if 'errors' in data:
+                            log(f"Podchaser query failed with errors", "error")
+                            log(data['errors'], "debug")
+                            spin.fail('✖')
+                            return None
                 else:
                     log(f"Podchaser query failed with status code {response.status_code}", "error")
                     log(response.text, "debug")
