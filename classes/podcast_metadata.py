@@ -226,10 +226,12 @@ class PodcastMetadata:
             'podchaser',
             Podchaser,
             search_term,
-            self.config.get('podchaser', {}).get('token', None),
+            self.config.get('podchaser', {}).get('client_id', None),
+            self.config.get('podchaser', {}).get('client_secret', None),
             self.config.get('podchaser', {}).get('fields', None),
             self.config.get('podchaser', {}).get('url', None),
-            self.config.get('podchaser', {}).get('limit', 25)
+            self.config.get('podchaser', {}).get('limit', 25),
+            self.config.get('cache', {}).get('directory', None)
         )
     
     def get_podcastindex_data(self, search_term=None):

@@ -1,25 +1,118 @@
 # podchaser.py
-import requests
 import json
+import time
+from pathlib import Path
+import requests
 from ..utils import spinner, log, announce, ask_yes_no, get_from_cache, write_to_cache
 
 class Podchaser:
-    def __init__(self, token, fields, url, limit):
-        """
-        Initialize the Podchaser API with the token and fields.
+    TOKEN_CACHE_KEY = "podchaser-auth.json"
+    TOKEN_LIFETIME_SECONDS = 365 * 24 * 60 * 60
 
-        :param token: The token to use for the API.
+    def __init__(self, client_id, client_secret, fields, url, limit, cache_directory=None):
+        """
+        Initialize the Podchaser API with the client credentials and fields.
+
+        :param client_id: The client ID for the API.
+        :param client_secret: The client secret for the API.
         :param fields: The fields to use for the query.
         :param url: The URL of the API.
         :param limit: The limit of results to return.
+        :param cache_directory: The directory to store the auth token.
 
         The Podchaser class is responsible for querying the Podchaser API.
         """
-        self.token = token
+        self.client_id = client_id
+        self.client_secret = client_secret
         self.results = None
         self.fields = fields
         self.url = url
         self.limit = limit
+        self.cache_directory = Path(cache_directory) if cache_directory else None
+
+    def get_token_cache_path(self):
+        if self.cache_directory:
+            self.cache_directory.mkdir(parents=True, exist_ok=True)
+            return self.cache_directory / self.TOKEN_CACHE_KEY
+        return Path(self.TOKEN_CACHE_KEY)
+
+    def load_cached_token(self):
+        cache_path = self.get_token_cache_path()
+        if not cache_path.exists():
+            return None
+        try:
+            data = json.loads(cache_path.read_text())
+        except json.JSONDecodeError:
+            return None
+        if not data.get("access_token") or not data.get("expires_at"):
+            return None
+        return data
+
+    def save_cached_token(self, token, expires_at):
+        cache_path = self.get_token_cache_path()
+        payload = {
+            "access_token": token,
+            "expires_at": expires_at,
+        }
+        cache_path.write_text(json.dumps(payload, indent=4))
+
+    def get_access_token(self):
+        cached = self.load_cached_token()
+        if cached and cached.get("expires_at", 0) > int(time.time()):
+            return cached.get("access_token")
+
+        if not self.client_id or not self.client_secret:
+            log("Podchaser client credentials are missing.", "error")
+            return None
+
+        mutation = """
+            mutation RequestAccessToken($client_id: String!, $client_secret: String!) {
+                requestAccessToken(
+                    input: {
+                        grant_type: CLIENT_CREDENTIALS
+                        client_id: $client_id
+                        client_secret: $client_secret
+                    }
+                ) {
+                    access_token
+                    token_type
+                    expires_in
+                }
+            }
+        """
+        payload = {
+            "query": mutation,
+            "variables": {
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+            },
+        }
+        headers = {
+            "Content-Type": "application/json",
+        }
+        response = requests.post(self.url, json=payload, headers=headers)
+        if response.status_code != 200:
+            log(f"Podchaser auth failed with status code {response.status_code}", "error")
+            log(response.text, "debug")
+            return None
+
+        data = response.json()
+        if data.get("errors"):
+            log("Podchaser auth response returned errors.", "error")
+            log(data["errors"], "debug")
+            return None
+
+        token_data = data.get("data", {}).get("requestAccessToken", {})
+        token = token_data.get("access_token")
+        if not token:
+            log("Podchaser auth response did not include an access token.", "error")
+            log(data, "debug")
+            return None
+
+        expires_in = token_data.get("expires_in") or self.TOKEN_LIFETIME_SECONDS
+        expires_at = int(time.time()) + int(expires_in)
+        self.save_cached_token(token, expires_at)
+        return token
 
     def build_fields(self, fields, indent_level=7):
         """
@@ -56,9 +149,13 @@ class Podchaser:
         :return: The data from the API.
         """
         with spinner(f"Searching for podcast {name} on Podchaser") as spin:
+                token = self.get_access_token()
+                if not token:
+                    spin.fail('✖')
+                    return None
                 headers = {
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.token}"
+                    "Authorization": f"Bearer {token}"
                 }
                 fields_query = self.build_fields(self.fields)
                 query = f"""
@@ -134,4 +231,3 @@ class Podchaser:
 
             
             
-
