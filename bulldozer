@@ -9,7 +9,7 @@ from classes.dupe_checker import DupeChecker
 from classes.podcast import Podcast
 from classes.torrent_creator import TorrentCreator
 from classes.utils import load_config, setup_logging, announce, ask_yes_no, check_config, log, fix_folder_name
-from classes.utils import rename_folder
+from classes.utils import rename_folder, check_and_install_podcast_dl, check_and_install_mktorrent
 from classes.report import Report
 
 config = load_config()
@@ -22,7 +22,20 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
     :param censor_rss: Whether to censor the RSS feed or not
     """
     global config
-    print("· • —– ++ ---| Bulldozer v0.7.4 |--- ++ —– • ·")
+    print("· • —– ++ ---| Bulldozer v0.7.3 |--- ++ —– • ·")
+    
+    # Check for required dependencies at startup
+    log("Checking required dependencies...", "info")
+    if not check_and_install_podcast_dl():
+        log("podcast-dl is not available and could not be installed automatically", "error")
+        announce("podcast-dl is required but not available. Please install it manually and try again.", "error")
+        exit(1)
+    
+    if not check_and_install_mktorrent():
+        log("mktorrent is not available and could not be installed automatically", "error")
+        announce("mktorrent is required but not available. Please install it manually and try again.", "error")
+        exit(1)
+    
     database_active = config.get("database", {}).get("active", True)
 
     if os.path.isdir(input):
@@ -45,7 +58,7 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
         else:
             temp_dir = Path(output_dir) / f"{name}"
         if temp_dir.exists():
-            if ask_yes_no(f"The directory where the podcast will be downloaded already exists. Would you like to delete it?"):
+            if ask_yes_no(f"The directory {temp_dir} already exists. Would you like to delete it?"):
                 shutil.rmtree(temp_dir)
             else:
                 announce(f"Exiting. Please check {temp_dir} and remove it to continue.", "info")
@@ -89,6 +102,43 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
         if database_active:
             podcast.add_metadata_to_database()
         report.generate()
+        # Show the generated content summary before proceeding to torrent creation
+        announce("Generated content summary:", "info")
+        print("\n" + "=" * 70)
+        
+        # Show report location and full content
+        report_path = report.get_file_path()
+        if report_path and report_path.exists():
+            announce(f"📄 Report: {report_path}", "info")
+            log(f"Report file location: {report_path}", "info")
+            # Show full report content
+            try:
+                with open(report_path, 'r', encoding='utf-8') as f:
+                    report_content = f.read()
+                    if report_content:
+                        print(f"\nFull report content:")
+                        print("=" * 70)
+                        print(report_content)
+                        print("=" * 70)
+            except Exception as e:
+                log(f"Could not read report file: {e}", "debug")
+        
+        # Show image location if available
+        image_path = podcast.image.get_file_path()
+        if image_path and image_path.exists():
+            announce(f"🖼️ Image: {image_path}", "info")
+        
+        # Show folder location
+        announce(f"📁 Podcast folder: {podcast.folder_path}", "info")
+        
+        # Show episode count
+        if hasattr(podcast, 'analyzer') and podcast.analyzer and hasattr(podcast.analyzer, 'original_files') and podcast.analyzer.original_files is not None:
+            episode_count = len(podcast.analyzer.original_files)
+        else:
+            episode_count = 'unknown'
+        announce(f"📊 Episodes: {episode_count}", "info")
+        
+        print("=" * 70 + "\n")
     if report_only:
         podcast.db.close()
         return

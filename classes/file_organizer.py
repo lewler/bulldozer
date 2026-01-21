@@ -1,12 +1,13 @@
 # file_organizer.py
 import fnmatch
 import re
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from mutagen.easyid3 import EasyID3
 from mutagen.mp4 import MP4
 from .utils import spinner, titlecase_filename, announce, log, perform_replacements
-from .utils import format_last_date, ask_yes_no, take_input, normalize_string
+from .utils import format_last_date, ask_yes_no, take_input, normalize_string, reset_yes_to_all
 
 class FileOrganizer:
     def __init__(self, podcast, config):
@@ -357,7 +358,7 @@ class FileOrganizer:
                         new_path = current_folder / file_path.name
                         if new_path.exists():
                             log(f"File '{new_path}' already exists", "debug")
-                            if not ask_yes_no(f"'{new_path.name}' already exists, overwrite?"):
+                            if not ask_yes_no(f"'{new_path.name}' already exists, overwrite?", allow_all=True):
                                 log("Skipping file", "debug")
                                 continue
                             log("Deleting file", "debug")
@@ -368,6 +369,7 @@ class FileOrganizer:
                         self.podcast.analyzer.remove_file(file_path)
 
             self.duplicate_metadata(current_folder)
+            reset_yes_to_all()  # Reset "yes to all" flag after file overwrite section
             announce(f"Podcast split into two folders, current year is in folder appended with --CURRENT--", "info")
         
         elif split == "yearly":
@@ -401,7 +403,7 @@ class FileOrganizer:
                             new_path = year_folder / file_path.name
                             if new_path.exists():
                                 log(f"File '{new_path}' already exists", "debug")
-                                if not ask_yes_no(f"'{new_path.name}' already exists, overwrite?"):
+                                if not ask_yes_no(f"'{new_path.name}' already exists, overwrite?", allow_all=True):
                                     log("Skipping file", "debug")
                                     continue
                                 log("Deleting file", "debug")
@@ -413,6 +415,7 @@ class FileOrganizer:
 
             announce(f"Podcast split into folder for year {start_year}", "info")
 
+            reset_yes_to_all()  # Reset "yes to all" flag after file overwrite section
             for year in range(start_year + 1, last_year + 1):
                 year_folder = self.podcast.folder_path.parent / f"{self.podcast.name} ({year})"
                 self.duplicate_metadata(year_folder)
@@ -511,6 +514,16 @@ class FileOrganizer:
         if new_folder_name:
             new_folder_path = self.podcast.folder_path.parent / new_folder_name
             log(f"Renaming folder '{self.podcast.folder_path}' to '{new_folder_path}'", "debug")
+            
+            # Check if target folder already exists
+            if new_folder_path.exists() and new_folder_path.is_dir():
+                if ask_yes_no(f"Directory {new_folder_path} already exists. Would you like to delete it?"):
+                    shutil.rmtree(new_folder_path)
+                    log(f"Deleted existing directory: {new_folder_path}", "info")
+                else:
+                    log(f"Skipping rename - target directory {new_folder_path} exists", "warning")
+                    return
+            
             self.podcast.folder_path.rename(new_folder_path)
             self.podcast.folder_path = new_folder_path
 
