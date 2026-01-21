@@ -6,6 +6,8 @@ import re
 import shutil
 import fnmatch
 import requests
+import gzip
+import zlib
 import platform
 import os
 from datetime import datetime
@@ -550,17 +552,57 @@ def download_file(url, target_path):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "Connection": "keep-alive"
     }
 
     try:
         response = requests.get(url, headers=headers)
         response.raise_for_status()
+        content = response.content
+        encoding = (response.headers.get("Content-Encoding") or "").lower()
+        if encoding == "br":
+            try:
+                import brotli
+                content = brotli.decompress(content)
+            except Exception as e:
+                log("Failed to decompress Brotli content", "error")
+                log(e, "debug")
+                return False
+        elif encoding in {"gzip", "x-gzip"}:
+            try:
+                content = gzip.decompress(content)
+            except OSError as e:
+                log("Gzip decoding failed; using raw content instead.", "debug")
+                log(e, "debug")
+        elif encoding == "deflate":
+            try:
+                content = zlib.decompress(content)
+            except zlib.error as e:
+                log("Deflate decoding failed; using raw content instead.", "debug")
+                log(e, "debug")
+        else:
+            if content.startswith(b"\x1f\x8b"):
+                try:
+                    content = gzip.decompress(content)
+                except OSError as e:
+                    log("Gzip magic detected but decoding failed; using raw content instead.", "debug")
+                    log(e, "debug")
+            elif content.startswith(b"\x78\x01") or content.startswith(b"\x78\x9c") or content.startswith(b"\x78\xda"):
+                try:
+                    content = zlib.decompress(content)
+                except zlib.error as e:
+                    log("Deflate magic detected but decoding failed; using raw content instead.", "debug")
+                    log(e, "debug")
+
         with target_path.open('wb') as file:
-            file.write(response.content)
+            file.write(content)
     except requests.exceptions.RequestException as e:
         log(f"An error occurred while downloading {url}", "error")
+        log(e, "debug")
+        return False
+    except (OSError, zlib.error) as e:
+        log(f"An error occurred while decompressing {url}", "error")
         log(e, "debug")
         return False
     
