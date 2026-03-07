@@ -12,9 +12,12 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 - Data fetching from Podnews
 - Automatic RSS censoring for matching premium sources
 - Optional local database with metadata for improved flexibility
-- Option to split active podcasts on current year (database required)
+- Option to split active podcasts on current year or yearly, with an interactive suggestion when relevant
 - Partial download of feed using --match-titles
 - Torrent file creation with piece size calculation
+- Optional UNIT3D web upload with Netscape cookie auth, image preprocessing, and tracker-torrent download
+- Optional qBittorrent injection after upload
+- Optional staging for local-folder runs using hardlinks or copies
 
 ## Requirements
 
@@ -61,6 +64,56 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 Edit the `config.yaml` file to set up your preferences and API keys. The configuration file includes pretty much all settings that are needed to customize the behavior of the script. The settings most users need to change are at the top of the configuration file. The file has comments, and it's hopefully easy enough to understand what everything does.
 
 Note that you do not need to copy the entire file, and you do not need to add values that you don't need to change. This approach means less work when new things are added to `config.default.yaml`.
+
+### UNIT3D Upload Configuration
+
+Bulldozer can now submit completed podcast uploads directly to a UNIT3D tracker such as Unwalled by using the normal web upload form. The upload stage is optional and disabled by default.
+
+Example override:
+
+```yaml
+upload:
+  active: true
+  backend: unit3d_web
+  base_url: https://unwalled.cc
+  cookie_file: data/cookies/UNW.txt
+  download_uploaded_torrent: true
+
+client:
+  active: true
+  backend: qbittorrent
+  url: http://127.0.0.1:8080
+```
+
+Notes:
+- Export the tracker session cookies in Netscape `cookies.txt` format.
+- Tracker category, type, anonymity, personal release, ads-removed, and extra keywords are resolved at runtime during the upload flow.
+- For no-meta trackers like Unwalled, the uploader will require a square cover JPG and a 16:9 banner JPG unless `upload.require_images` is disabled.
+- After a successful upload, Bulldozer can download the tracker-returned `.torrent` file separately so you can seed with the tracker version.
+- qBittorrent injection uses the parent of the processed folder as the save path so qBittorrent can recheck and seed the existing data.
+- qBittorrent credentials can be set in `client.username` / `client.password` or provided via `QBITTORRENT_USERNAME` / `QBITTORRENT_PASSWORD` or `QBT_USER` / `QBT_PASS`.
+- Interactive upload runs default the create-torrent and upload-confirmation prompts to yes so you can step through the flow with Enter.
+
+### Local Folder Staging
+
+When you point Bulldozer at an existing local podcast folder, Bulldozer normally organizes that folder in place. If upload or qBittorrent injection is enabled, staging is the safe way to preserve your library while still producing a tracker-shaped working tree that qBittorrent can seed.
+
+Example override:
+
+```yaml
+staging:
+  active: true
+  path: /mnt/Pool/Media/Torrents/.bulldozer-staging
+  mode: hardlink
+```
+
+Notes:
+- `staging.mode: hardlink` creates a seedable working tree without duplicating the underlying media data.
+- If `staging.path` is not set and staging is forced by upload or client injection, Bulldozer stages into a sibling `.bulldozer-staging` folder next to the source input.
+- qBittorrent injection uses the staged folder, so the returned tracker torrent sees the same layout Bulldozer uploaded.
+- Hardlink staging skips in-place audio tag rewrites by default so the source library is not modified through shared inodes.
+- `staging.overwrite: true` replaces an existing staged folder with the same name before a new run.
+- When an active podcast spans multiple years and `split: false`, interactive upload/client runs suggest splitting automatically and default to `yearly` so a single root-folder run can queue one upload per year.
 
 ## Upgrading
 
@@ -117,6 +170,8 @@ chmod +x bulldozer
 - `--before`: Will only keep episodes released before <input> in the feed (YYYY-MM-DD).
 - `--latest-episode-only`: Will only keep the newest episode in the feed.
 - `--threads`: Overrides the setting in config.yaml for the number of threads podcast-dl uses.
+- `--upload`: Runs the configured upload backend after torrent creation.
+- `--upload-dry-run`: Validates auth, title, keywords, images, and the prepared UNIT3D payload without submitting.
 
 ## Running With Docker
 
