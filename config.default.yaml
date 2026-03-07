@@ -58,6 +58,15 @@ move:
   ask: false # Whether to ask before moving
   path: /home/user/torrents # The path to move the folder to
 
+## Staging settings
+staging:
+  active: false # Whether to always stage local-folder inputs before organizing them
+  ask: false # Whether to ask before creating the staged working tree
+  path: null # Defaults to <source parent>/.bulldozer-staging when staging is forced and no path is set
+  mode: hardlink # hardlink or copy
+  overwrite: true # Replace an existing staged tree with the same name
+  protect_source_content: true # Skip in-place audio tag rewrites when staging via hardlinks
+
 ## Upload settings
 upload:
   active: false # Whether to offer tracker upload after creating the torrent

@@ -12,7 +12,7 @@ from .utils import log, run_command, announce, spinner, get_metadata_directory, 
 from .database import Database
 
 class Podcast:
-    def __init__(self, name, folder_path, config, source_rss_file=None, censor_rss=False, check_duplicates=True, search_term=None, match_titles=None, after_date=None, before_date=None, latest_episode_only=False):
+    def __init__(self, name, folder_path, config, source_rss_file=None, censor_rss=False, check_duplicates=True, search_term=None, match_titles=None, after_date=None, before_date=None, latest_episode_only=False, source_is_local_folder=False):
         """
         Initialize the Podcast with the name, folder path, configuration, and source RSS file.
 
@@ -41,6 +41,7 @@ class Podcast:
         self.after_date = after_date
         self.before_date = before_date
         self.latest_episode_only = latest_episode_only
+        self.source_is_local_folder = source_is_local_folder
         self.rss = Rss(self, source_rss_file, self.config, censor_rss)
         self.image = PodcastImage(self, self.config)
         self.metadata = PodcastMetadata(self, self.config)
@@ -157,7 +158,13 @@ class Podcast:
         Clean up and exit.
         """
         log("Cleaning up and exiting...", "debug")
-        shutil.rmtree(self.folder_path)
+        staging_runtime = self.config.get('_staging_runtime', {})
+        if self.source_is_local_folder and not staging_runtime.get('active', False):
+            log(f"Skipping cleanup for local folder input {self.folder_path}", "info")
+            exit(1)
+
+        if self.folder_path.exists():
+            shutil.rmtree(self.folder_path)
         exit(1)
 
     def load_from_database(self, refresh=False):

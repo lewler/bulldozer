@@ -16,6 +16,8 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 - Partial download of feed using --match-titles
 - Torrent file creation with piece size calculation
 - Optional UNIT3D web upload with Netscape cookie auth, image preprocessing, and tracker-torrent download
+- Optional qBittorrent injection after upload
+- Optional staging for local-folder runs using hardlinks or copies
 
 ## Requirements
 
@@ -90,6 +92,26 @@ Notes:
 - After a successful upload, Bulldozer can download the tracker-returned `.torrent` file separately so you can seed with the tracker version.
 - qBittorrent injection uses the parent of the processed folder as the save path so qBittorrent can recheck and seed the existing data.
 - qBittorrent credentials can be set in `client.username` / `client.password` or provided via `QBITTORRENT_USERNAME` / `QBITTORRENT_PASSWORD` or `QBT_USER` / `QBT_PASS`.
+
+### Local Folder Staging
+
+When you point Bulldozer at an existing local podcast folder, Bulldozer normally organizes that folder in place. If upload or qBittorrent injection is enabled, staging is the safe way to preserve your library while still producing a tracker-shaped working tree that qBittorrent can seed.
+
+Example override:
+
+```yaml
+staging:
+  active: true
+  path: /mnt/Pool/Media/Torrents/.bulldozer-staging
+  mode: hardlink
+```
+
+Notes:
+- `staging.mode: hardlink` creates a seedable working tree without duplicating the underlying media data.
+- If `staging.path` is not set and staging is forced by upload or client injection, Bulldozer stages into a sibling `.bulldozer-staging` folder next to the source input.
+- qBittorrent injection uses the staged folder, so the returned tracker torrent sees the same layout Bulldozer uploaded.
+- Hardlink staging skips in-place audio tag rewrites by default so the source library is not modified through shared inodes.
+- `staging.overwrite: true` replaces an existing staged folder with the same name before a new run.
 
 ## Upgrading
 

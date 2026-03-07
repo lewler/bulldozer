@@ -89,6 +89,16 @@ class FileOrganizer:
         """
         Update metadata fields in audio files based on the 'file_metadata_replacements' configuration.
         """
+        staging_runtime = self.config.get('_staging_runtime', {})
+        if (
+            staging_runtime.get('active')
+            and staging_runtime.get('mode') == 'hardlink'
+            and staging_runtime.get('protect_source_content', True)
+        ):
+            announce("Skipping file metadata tag updates to protect the source library during hardlink staging", "info")
+            log("Skipping file metadata updates because hardlink staging is active", "info")
+            return
+
         replacements = self.config.get('file_metadata_replacements', [])
 
         for file_path in Path(self.podcast.folder_path).rglob('*'):
