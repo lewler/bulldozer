@@ -88,6 +88,7 @@ class Unit3DWebUploader:
         csrf_token = extract_csrf_token(html)
         if not csrf_token:
             raise ValueError("Could not extract a CSRF token from the UNIT3D upload page.")
+        form_defaults = extract_form_defaults(html)
 
         category_options = parse_select_options(html, "category_id")
         type_options = parse_select_options(html, "type_id")
@@ -97,7 +98,7 @@ class Unit3DWebUploader:
         nfo_path = self._discover_nfo_path()
         cover_path = self._prepare_cover_image()
         banner_path = self._prepare_banner_image(nfo_path=nfo_path, cover_path=cover_path, dry_run=dry_run)
-        payload = self._build_payload(csrf_token=csrf_token)
+        payload = self._build_payload(csrf_token=csrf_token, form_defaults=form_defaults)
 
         if len(payload["name"]) > 255:
             raise ValueError("Upload title exceeds UNIT3D's 255 character limit.")
@@ -338,10 +339,11 @@ class Unit3DWebUploader:
                 return str(option_id)
         return next(iter(options.keys()), None)
 
-    def _build_payload(self, csrf_token):
+    def _build_payload(self, csrf_token, form_defaults=None):
         if not self.release_profile:
             raise ValueError("Release profile has not been resolved yet.")
-        payload = {
+        payload = dict(form_defaults or {})
+        payload.update({
             "_token": csrf_token,
             "name": self.upload_context.name or self.upload_context.raw_name or self.podcast.name,
             "category_id": self.release_profile.category_id,
@@ -350,7 +352,17 @@ class Unit3DWebUploader:
             "keywords": self.upload_context.keywords_string,
             "anon": "1" if self.release_profile.anonymous else "0",
             "personal_release": "1" if self.release_profile.personal_release else "0",
-        }
+        })
+
+        payload.setdefault("stream", "0")
+        payload.setdefault("sd", "0")
+        payload.setdefault("tmdb", "0")
+        payload.setdefault("imdb", "0")
+        payload.setdefault("tvdb", "0")
+        payload.setdefault("mal", "0")
+        payload.setdefault("igdb", "0")
+        payload["season_number"] = self._infer_season_number()
+        payload["episode_number"] = self._infer_episode_number()
 
         mediainfo = self.upload_context.data.get("mediainfo", {})
         if isinstance(mediainfo, dict):
@@ -359,6 +371,29 @@ class Unit3DWebUploader:
             payload["mediainfo"] = ""
 
         return payload
+
+    def _infer_season_number(self):
+        file_count = self.upload_context.data.get("number_of_files", 0)
+        if file_count and file_count > 1:
+            return "0"
+        return "1"
+
+    def _infer_episode_number(self):
+        file_count = self.upload_context.data.get("number_of_files", 0)
+        if file_count and file_count > 1:
+            return "0"
+
+        audio_files = sorted(
+            file_path for file_path in self.podcast.folder_path.iterdir()
+            if file_path.is_file() and file_path.suffix.lower() in {".m4a", ".mp3", ".mp4", ".m4b", ".flac", ".ogg"}
+        )
+        if audio_files:
+            match = re.search(r"\[#?(\d+)\]", audio_files[0].stem)
+            if not match:
+                match = re.search(r"\b(\d+)\b", audio_files[0].stem)
+            if match:
+                return match.group(1)
+        return "0"
 
     def _prepare_cover_image(self):
         cover_source = self._discover_cover_path()
@@ -654,6 +689,56 @@ def extract_upload_form_action(base_url, html):
             if action:
                 return urljoin(f"{base_url}/", action)
     return None
+
+
+def extract_form_defaults(html):
+    soup = BeautifulSoup(html, "html.parser")
+    target_form = None
+    for form in soup.find_all("form"):
+        if form.find("input", {"name": "torrent"}):
+            target_form = form
+            break
+    if not target_form:
+        return {}
+
+    defaults = {}
+    for field in target_form.find_all(["input", "textarea", "select"]):
+        name = field.get("name")
+        if not name:
+            continue
+
+        if field.name == "input":
+            field_type = field.get("type", "text").lower()
+            if field_type == "file":
+                continue
+            if field_type in {"checkbox", "radio"}:
+                if field.has_attr("checked"):
+                    defaults[name] = field.get("value") or "1"
+                continue
+
+            value = field.get("value")
+            if value in (None, ""):
+                continue
+            if name not in defaults or defaults[name] == "":
+                defaults[name] = value
+            continue
+
+        if field.name == "textarea":
+            value = field.get_text(strip=True)
+            if value and name not in defaults:
+                defaults[name] = value
+            continue
+
+        if field.name == "select":
+            selected = None
+            for option in field.find_all("option"):
+                if option.has_attr("selected"):
+                    selected = option.get("value")
+                    break
+            if selected not in (None, ""):
+                defaults[name] = selected
+
+    return defaults
 
 
 def extract_validation_errors(html):

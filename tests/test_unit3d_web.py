@@ -9,6 +9,7 @@ from classes.upload_context import ReleaseProfile
 from classes.uploaders.unit3d_web import (
     create_banner_from_cover,
     extract_csrf_token,
+    extract_form_defaults,
     extract_upload_form_action,
     extract_success_links,
     extract_validation_errors,
@@ -46,6 +47,24 @@ class Unit3DWebHelpersTest(unittest.TestCase):
         self.assertEqual(extract_upload_form_action("https://unwalled.cc", html), "https://unwalled.cc/torrents")
         self.assertEqual(parse_select_options(html, "category_id"), {"11": "Comedy", "12": "Science"})
         self.assertEqual(parse_select_options(html, "type_id"), {"21": "Free Audio", "22": "Patreon Audio"})
+
+    def test_extract_form_defaults_prefers_hidden_defaults_over_empty_text_inputs(self):
+        html = """
+        <form action="https://unwalled.cc/torrents">
+          <input type="file" name="torrent" />
+          <input type="hidden" name="_token" value="csrf-token-123" />
+          <input type="hidden" name="stream" value="0" />
+          <input type="checkbox" name="stream" />
+          <input type="hidden" name="tmdb" value="0" />
+          <input type="text" name="tmdb" value="" />
+          <input type="hidden" name="anon" value="0" />
+          <input type="checkbox" name="anon" value="1" />
+        </form>
+        """
+        self.assertEqual(
+            extract_form_defaults(html),
+            {"_token": "csrf-token-123", "stream": "0", "tmdb": "0", "anon": "0"},
+        )
 
     def test_extract_validation_errors_from_fixture(self):
         html = (FIXTURES / "unit3d_upload_error.html").read_text(encoding="utf-8")
@@ -130,7 +149,7 @@ class Unit3DWebHelpersTest(unittest.TestCase):
                 raw_name="Wine About It [2024/MP3 - 320kbps]",
                 description="description text",
                 keywords_string="comedy, Patreon",
-                data={"mediainfo": {"output": "Audio\nBit rate : 320 kb/s"}},
+                data={"mediainfo": {"output": "Audio\nBit rate : 320 kb/s"}, "number_of_files": 12},
             )
             config = {
                 "upload": {
@@ -151,7 +170,10 @@ class Unit3DWebHelpersTest(unittest.TestCase):
                     personal_release=False,
                     ads_removed=False,
                 )
-                payload = uploader._build_payload("csrf-token-123")
+                payload = uploader._build_payload(
+                    "csrf-token-123",
+                    form_defaults={"stream": "0", "sd": "0", "tmdb": "0", "mal": "0", "anon": "0"},
+                )
             finally:
                 uploader.cleanup()
 
@@ -163,6 +185,12 @@ class Unit3DWebHelpersTest(unittest.TestCase):
             self.assertEqual(payload["keywords"], "comedy, Patreon")
             self.assertEqual(payload["anon"], "0")
             self.assertEqual(payload["personal_release"], "0")
+            self.assertEqual(payload["stream"], "0")
+            self.assertEqual(payload["sd"], "0")
+            self.assertEqual(payload["tmdb"], "0")
+            self.assertEqual(payload["mal"], "0")
+            self.assertEqual(payload["season_number"], "0")
+            self.assertEqual(payload["episode_number"], "0")
             self.assertIn("320 kb/s", payload["mediainfo"])
 
 
