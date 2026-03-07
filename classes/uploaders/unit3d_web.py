@@ -1,0 +1,521 @@
+from __future__ import annotations
+
+import http.cookiejar
+import re
+import tempfile
+from dataclasses import dataclass, field
+from fnmatch import fnmatch
+from pathlib import Path
+from urllib.parse import urljoin, urlparse
+
+import requests
+from bs4 import BeautifulSoup
+from PIL import Image, ImageOps
+
+from ..utils import ask_yes_no, take_input
+
+
+MAX_UPLOAD_BYTES = 950_000
+UPLOAD_SAFETY_MARGIN_BYTES = 25_000
+DEFAULT_COVER_SIZE = (600, 600)
+DEFAULT_BANNER_SIZE = (1280, 720)
+MIN_BANNER_SIZE = (960, 540)
+DEFAULT_IMAGE_QUALITY = 88
+MIN_IMAGE_QUALITY = 46
+QUALITY_STEP = 6
+
+try:
+    RESAMPLING_LANCZOS = Image.Resampling.LANCZOS
+except AttributeError:
+    RESAMPLING_LANCZOS = Image.LANCZOS
+
+
+@dataclass
+class UploadPreparation:
+    payload: dict
+    warnings: list[str]
+    category_name: str
+    type_name: str
+    csrf_token: str
+    upload_url: str
+    torrent_path: Path
+    cover_path: Path | None = None
+    banner_path: Path | None = None
+    nfo_path: Path | None = None
+
+
+@dataclass
+class UploadResult:
+    success: bool
+    details_url: str | None = None
+    download_url: str | None = None
+    validation_errors: list[str] = field(default_factory=list)
+    status_message: str = ""
+    tracker_torrent_path: Path | None = None
+
+
+class Unit3DWebUploader:
+    def __init__(self, podcast, config, upload_context, torrent_path):
+        self.podcast = podcast
+        self.config = config
+        self.upload_context = upload_context
+        self.upload_config = config.get("upload", {})
+        self.base_url = self.upload_config.get("base_url", "").rstrip("/")
+        self.upload_url = urljoin(f"{self.base_url}/", "upload")
+        self.torrent_path = Path(torrent_path)
+        self.timeout = self.upload_config.get("timeout", 60)
+        self.user_agent = self.upload_config.get("user_agent", "Bulldozer uploader")
+        self.require_images = self.upload_config.get("require_images", True)
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": self.user_agent})
+        self._temp_dir = tempfile.TemporaryDirectory(prefix="bulldozer-upload-")
+        self.temp_dir = Path(self._temp_dir.name)
+
+    def cleanup(self):
+        self._temp_dir.cleanup()
+
+    def run_preflight(self):
+        self._load_session_cookies()
+        response = self.session.get(self.upload_url, timeout=self.timeout, allow_redirects=True)
+        if not response.ok:
+            raise ValueError(f"Failed to load upload page: HTTP {response.status_code}")
+        if self._looks_like_login_page(response.url, response.text):
+            raise ValueError("Upload page request appears unauthenticated. Check the exported cookie file.")
+
+        html = response.text
+        csrf_token = extract_csrf_token(html)
+        if not csrf_token:
+            raise ValueError("Could not extract a CSRF token from the UNIT3D upload page.")
+
+        category_options = parse_select_options(html, "category_id")
+        type_options = parse_select_options(html, "type_id")
+        category_id = self._require_option_id("category_id", category_options)
+        type_id = self._require_option_id("type_id", type_options)
+
+        nfo_path = self._discover_nfo_path()
+        cover_path = self._prepare_cover_image()
+        banner_path = self._prepare_banner_image(nfo_path=nfo_path, cover_path=cover_path)
+        payload = self._build_payload(csrf_token=csrf_token, category_id=category_id, type_id=type_id)
+
+        if len(payload["name"]) > 255:
+            raise ValueError("Upload title exceeds UNIT3D's 255 character limit.")
+        if len(payload["description"]) > 65_535:
+            raise ValueError("Rendered description exceeds UNIT3D's 65535 character limit.")
+
+        warnings = list(self.upload_context.warnings)
+        warnings.extend(self._build_size_warnings(nfo_path=nfo_path, cover_path=cover_path, banner_path=banner_path))
+
+        return UploadPreparation(
+            payload=payload,
+            warnings=warnings,
+            category_name=category_options[str(category_id)],
+            type_name=type_options[str(type_id)],
+            csrf_token=csrf_token,
+            upload_url=self.upload_url,
+            torrent_path=self.torrent_path,
+            cover_path=cover_path,
+            banner_path=banner_path,
+            nfo_path=nfo_path,
+        )
+
+    def submit(self, preparation):
+        files = {}
+        handles = []
+        try:
+            handles.append(preparation.torrent_path.open("rb"))
+            files["torrent"] = (
+                preparation.torrent_path.name,
+                handles[-1],
+                "application/x-bittorrent",
+            )
+
+            if preparation.nfo_path:
+                handles.append(preparation.nfo_path.open("rb"))
+                files["nfo"] = (preparation.nfo_path.name, handles[-1], "text/plain")
+
+            if preparation.cover_path:
+                handles.append(preparation.cover_path.open("rb"))
+                files["torrent-cover"] = (preparation.cover_path.name, handles[-1], "image/jpeg")
+
+            if preparation.banner_path:
+                handles.append(preparation.banner_path.open("rb"))
+                files["torrent-banner"] = (preparation.banner_path.name, handles[-1], "image/jpeg")
+
+            response = self.session.post(
+                preparation.upload_url,
+                data=preparation.payload,
+                files=files,
+                timeout=self.timeout,
+                allow_redirects=True,
+            )
+        finally:
+            for handle in handles:
+                handle.close()
+
+        if self._looks_like_login_page(response.url, response.text):
+            return UploadResult(success=False, status_message="Upload failed because the session appears to be expired.")
+
+        details_url, download_url = extract_success_links(self.base_url, str(response.url), response.text)
+        if details_url and download_url:
+            tracker_torrent_path = None
+            if self.upload_config.get("download_uploaded_torrent", True):
+                tracker_torrent_path = self._download_uploaded_torrent(download_url)
+            return UploadResult(
+                success=True,
+                details_url=details_url,
+                download_url=download_url,
+                status_message=f"Upload completed successfully: {details_url}",
+                tracker_torrent_path=tracker_torrent_path,
+            )
+
+        validation_errors = extract_validation_errors(response.text)
+        if validation_errors:
+            return UploadResult(
+                success=False,
+                validation_errors=validation_errors,
+                status_message="Tracker returned validation errors.",
+            )
+
+        if response.status_code >= 400:
+            return UploadResult(
+                success=False,
+                status_message=f"Upload failed with HTTP {response.status_code}.",
+            )
+
+        return UploadResult(
+            success=False,
+            status_message="Upload did not reach a download-check page. Review the tracker response manually.",
+        )
+
+    def _load_session_cookies(self):
+        cookie_file = Path(self.upload_config.get("cookie_file", "")).expanduser()
+        if not cookie_file.is_absolute():
+            cookie_file = Path.cwd() / cookie_file
+        if not cookie_file.exists():
+            raise FileNotFoundError(
+                f"Cookie file not found: {cookie_file}. Export your UNIT3D session cookies in Netscape format."
+            )
+
+        cookie_jar = load_netscape_cookie_jar(cookie_file)
+        self.session.cookies = cookie_jar
+
+    def _require_option_id(self, field_name, options):
+        configured_value = self.upload_config.get(field_name)
+        if configured_value is None:
+            available = ", ".join(f"{option_id}: {label}" for option_id, label in options.items())
+            raise ValueError(f"{field_name} is not configured. Available choices: {available}")
+
+        configured_value = str(configured_value)
+        if configured_value not in options:
+            available = ", ".join(f"{option_id}: {label}" for option_id, label in options.items())
+            raise ValueError(f"Configured {field_name}={configured_value} is not valid. Available choices: {available}")
+
+        return configured_value
+
+    def _build_payload(self, csrf_token, category_id, type_id):
+        payload = {
+            "_token": csrf_token,
+            "name": self.upload_context.name or self.upload_context.raw_name or self.podcast.name,
+            "category_id": str(category_id),
+            "type_id": str(type_id),
+            "description": self.upload_context.description,
+            "keywords": self.upload_context.keywords_string,
+            "anon": "1" if self.upload_config.get("anonymous", False) else "0",
+            "personal_release": "1" if self.upload_config.get("personal_release", False) else "0",
+        }
+
+        mediainfo = self.upload_context.data.get("mediainfo", {})
+        if isinstance(mediainfo, dict):
+            payload["mediainfo"] = mediainfo.get("output", "")
+        else:
+            payload["mediainfo"] = ""
+
+        return payload
+
+    def _prepare_cover_image(self):
+        cover_source = self._discover_cover_path()
+        if not cover_source:
+            if self.require_images:
+                raise ValueError("No cover image was found. Configure upload.cover_path or provide a cover file in Metadata/cover.* or cover.*.")
+            return None
+
+        output_path = self.temp_dir / "cover-upload.jpg"
+        prepare_cover_image(cover_source, output_path)
+        return output_path
+
+    def _prepare_banner_image(self, nfo_path=None, cover_path=None):
+        banner_source = self._discover_banner_path()
+        if not banner_source:
+            if self.require_images:
+                raise ValueError("No banner image was found. Configure upload.banner_path, place banner.* in the release folder, or provide one when prompted.")
+            return None
+
+        output_path = self.temp_dir / "banner-upload.jpg"
+        size_budget = self._calculate_banner_budget(nfo_path=nfo_path, cover_path=cover_path)
+        prepare_banner_image(banner_source, output_path, size_budget=size_budget)
+        return output_path
+
+    def _calculate_banner_budget(self, nfo_path=None, cover_path=None):
+        total_fixed_bytes = self.torrent_path.stat().st_size + UPLOAD_SAFETY_MARGIN_BYTES
+        if nfo_path:
+            total_fixed_bytes += nfo_path.stat().st_size
+        if cover_path:
+            total_fixed_bytes += cover_path.stat().st_size
+        budget = MAX_UPLOAD_BYTES - total_fixed_bytes
+        if budget <= 0:
+            raise ValueError(
+                "The local torrent plus cover/NFO already exceed Unwalled's practical initial upload size budget. Increase piece size or shrink assets before uploading."
+            )
+        return budget
+
+    def _discover_cover_path(self):
+        configured_path = self._resolve_config_path(self.upload_config.get("cover_path"))
+        if configured_path:
+            return configured_path
+
+        metadata_dir = self.podcast.folder_path / self.config.get("metadata_directory", "Metadata")
+        candidates = [
+            self._find_named_file(metadata_dir, ["cover.jpg", "cover.jpeg", "cover.png", "cover.webp", "cover.avif"]),
+            self._find_named_file(self.podcast.folder_path, ["cover.jpg", "cover.jpeg", "cover.png", "cover.webp", "cover.avif"]),
+            self.podcast.image.get_meta_file_path(),
+            self.podcast.image.get_file_path(),
+            self.podcast.folder_path.parent / f"{self.podcast.folder_path.name}_cover.jpg",
+        ]
+        for candidate in candidates:
+            if candidate and Path(candidate).exists():
+                return Path(candidate)
+        return None
+
+    def _discover_banner_path(self):
+        configured_path = self._resolve_config_path(self.upload_config.get("banner_path"))
+        if configured_path:
+            return configured_path
+
+        metadata_dir = self.podcast.folder_path / self.config.get("metadata_directory", "Metadata")
+        candidates = [
+            self._find_named_file(metadata_dir, ["banner.jpg", "banner.jpeg", "banner.png", "banner.webp", "banner.avif"]),
+            self._find_named_file(self.podcast.folder_path, ["banner.jpg", "banner.jpeg", "banner.png", "banner.webp", "banner.avif"]),
+        ]
+        for candidate in candidates:
+            if candidate and Path(candidate).exists():
+                return Path(candidate)
+
+        entered_path = take_input("Banner image not found automatically. Enter a path to a local banner image")
+        return self._resolve_config_path(entered_path)
+
+    def _discover_nfo_path(self):
+        metadata_dir = self.podcast.folder_path / self.config.get("metadata_directory", "Metadata")
+        candidates = [
+            self._find_first_glob(self.podcast.folder_path, "*.nfo"),
+            self._find_first_glob(metadata_dir, "*.nfo"),
+        ]
+        for candidate in candidates:
+            if candidate and candidate.exists():
+                return candidate
+        return None
+
+    def _resolve_config_path(self, path_value):
+        if not path_value:
+            return None
+        candidate = Path(path_value).expanduser()
+        search_roots = [Path.cwd(), self.podcast.folder_path, self.podcast.folder_path.parent]
+        if candidate.is_absolute():
+            return candidate if candidate.exists() else None
+
+        for root in search_roots:
+            resolved = root / candidate
+            if resolved.exists():
+                return resolved
+        return None
+
+    def _find_named_file(self, directory, names):
+        directory = Path(directory)
+        if not directory.exists() or not directory.is_dir():
+            return None
+        lowered = {name.lower() for name in names}
+        for file_path in directory.iterdir():
+            if file_path.is_file() and file_path.name.lower() in lowered:
+                return file_path
+        return None
+
+    def _find_first_glob(self, directory, pattern):
+        directory = Path(directory)
+        if not directory.exists() or not directory.is_dir():
+            return None
+        for file_path in directory.iterdir():
+            if file_path.is_file() and fnmatch(file_path.name.lower(), pattern.lower()):
+                return file_path
+        return None
+
+    def _build_size_warnings(self, nfo_path=None, cover_path=None, banner_path=None):
+        warnings = []
+        total_bytes = self.torrent_path.stat().st_size
+        if nfo_path:
+            total_bytes += nfo_path.stat().st_size
+        if cover_path:
+            total_bytes += cover_path.stat().st_size
+        if banner_path:
+            total_bytes += banner_path.stat().st_size
+
+        if total_bytes > MAX_UPLOAD_BYTES:
+            warnings.append(
+                "The initial upload payload is still above the tracker's practical 1 MB limit. The upload may fail until the banner or torrent is reduced further."
+            )
+        return warnings
+
+    def _download_uploaded_torrent(self, download_url):
+        response = self.session.get(download_url, timeout=self.timeout, allow_redirects=True)
+        if not response.ok:
+            raise ValueError(f"Upload succeeded but downloading the tracker torrent failed: HTTP {response.status_code}")
+
+        tracker_torrent_path = self._build_tracker_torrent_path()
+        if tracker_torrent_path.exists() and not ask_yes_no(f"Tracker torrent {tracker_torrent_path} already exists. Replace it?"):
+            return tracker_torrent_path
+
+        tracker_torrent_path.write_bytes(response.content)
+        return tracker_torrent_path
+
+    def _build_tracker_torrent_path(self):
+        host = urlparse(self.base_url).netloc.replace(":", "_")
+        return self.torrent_path.with_name(f"{self.torrent_path.stem}.{host}.tracker.torrent")
+
+    def _looks_like_login_page(self, url, html):
+        normalized_url = str(url).lower()
+        if "/login" in normalized_url:
+            return True
+        soup = BeautifulSoup(html, "html.parser")
+        if soup.find("form", {"action": re.compile("login", re.IGNORECASE)}):
+            return True
+        title = soup.title.string.strip().lower() if soup.title and soup.title.string else ""
+        return "login" in title
+
+
+def load_netscape_cookie_jar(cookie_file):
+    cookie_jar = http.cookiejar.MozillaCookieJar(str(cookie_file))
+    try:
+        cookie_jar.load(ignore_discard=True, ignore_expires=True)
+    except http.cookiejar.LoadError as error:
+        raise ValueError(f"Failed to load Netscape cookie file {cookie_file}: {error}") from error
+    return cookie_jar
+
+
+def extract_csrf_token(html):
+    soup = BeautifulSoup(html, "html.parser")
+    token_input = soup.find("input", {"name": "_token"})
+    if token_input and token_input.get("value"):
+        return token_input.get("value")
+    meta_tag = soup.find("meta", {"name": "csrf-token"})
+    if meta_tag and meta_tag.get("content"):
+        return meta_tag.get("content")
+    return None
+
+
+def parse_select_options(html, select_name):
+    soup = BeautifulSoup(html, "html.parser")
+    select = soup.find("select", {"name": select_name})
+    if not select:
+        return {}
+    options = {}
+    for option in select.find_all("option"):
+        value = option.get("value")
+        label = option.get_text(" ", strip=True)
+        if value in (None, "") or not label:
+            continue
+        options[str(value)] = label
+    return options
+
+
+def extract_validation_errors(html):
+    soup = BeautifulSoup(html, "html.parser")
+    errors = []
+
+    error_copy = soup.find(id="ERROR_COPY")
+    if error_copy:
+        errors.extend([line.strip() for line in error_copy.get_text("\n").splitlines() if line.strip()])
+
+    for selector in ("li.auth-form__error", ".form__hint", ".text-red"):
+        for node in soup.select(selector):
+            text = node.get_text(" ", strip=True)
+            if text:
+                errors.append(text)
+
+    deduped = []
+    seen = set()
+    for error in errors:
+        marker = error.casefold()
+        if marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(error)
+    return deduped
+
+
+def extract_success_links(base_url, final_url, html):
+    torrent_id = None
+    final_url = str(final_url)
+    match = re.search(r"/download_check/(\d+)", final_url)
+    if match:
+        torrent_id = match.group(1)
+
+    if not torrent_id:
+        soup = BeautifulSoup(html, "html.parser")
+        download_link = soup.find("a", href=re.compile(r"/download/\d+"))
+        if download_link and download_link.get("href"):
+            match = re.search(r"/download/(\d+)", download_link.get("href"))
+            if match:
+                torrent_id = match.group(1)
+
+    if not torrent_id:
+        return None, None
+
+    details_url = urljoin(f"{base_url}/", f"torrents/{torrent_id}")
+    download_url = urljoin(f"{base_url}/", f"download/{torrent_id}")
+    return details_url, download_url
+
+
+def prepare_cover_image(source_path, output_path):
+    _prepare_image(
+        source_path=source_path,
+        output_path=output_path,
+        target_size=DEFAULT_COVER_SIZE,
+        min_size=(400, 400),
+        size_budget=None,
+    )
+
+
+def prepare_banner_image(source_path, output_path, size_budget):
+    _prepare_image(
+        source_path=source_path,
+        output_path=output_path,
+        target_size=DEFAULT_BANNER_SIZE,
+        min_size=MIN_BANNER_SIZE,
+        size_budget=size_budget,
+    )
+
+
+def _prepare_image(source_path, output_path, target_size, min_size, size_budget=None):
+    source_path = Path(source_path)
+    output_path = Path(output_path)
+    with Image.open(source_path) as image:
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        quality_values = list(range(DEFAULT_IMAGE_QUALITY, MIN_IMAGE_QUALITY - 1, -QUALITY_STEP))
+        size_candidates = [target_size]
+        if target_size != min_size:
+            size_candidates.extend([
+                (1152, 648),
+                (1024, 576),
+                min_size,
+            ])
+
+        for width, height in size_candidates:
+            candidate = ImageOps.fit(image, (width, height), method=RESAMPLING_LANCZOS)
+            for quality in quality_values:
+                candidate.save(output_path, format="JPEG", quality=quality, optimize=True, progressive=True)
+                if size_budget is None or output_path.stat().st_size <= size_budget:
+                    return output_path
+
+    if size_budget is not None:
+        raise ValueError(
+            f"Could not compress {source_path.name} below the required size budget ({size_budget} bytes)."
+        )
+    raise ValueError(f"Could not prepare image {source_path}")

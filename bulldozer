@@ -11,10 +11,11 @@ from classes.torrent_creator import TorrentCreator
 from classes.utils import load_config, setup_logging, announce, ask_yes_no, check_config, log, fix_folder_name
 from classes.utils import rename_folder, check_and_install_podcast_dl, check_and_install_mktorrent
 from classes.report import Report
+from classes.upload_manager import UploadManager
 
 config = load_config()
 
-def main(input, censor_rss, report_only=False, search_term=None, download_only=False, refresh=False, name=None, match_titles=None, after_date=None, before_date=None, threads=None, latest_episode_only=False):
+def main(input, censor_rss, report_only=False, search_term=None, download_only=False, refresh=False, name=None, match_titles=None, after_date=None, before_date=None, threads=None, latest_episode_only=False, upload=False, upload_dry_run=False):
     """
     Main function to run the bulldozer script
 
@@ -147,7 +148,18 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
     announce_url = config.get("announce_url", None)
     base_dir = config.get("base_dir", None)
     tracker_source = config.get("tracker_source", None)
-    create_torrent(podcast, announce_url, base_dir, tracker_source)
+    torrent_path = create_torrent(podcast, announce_url, base_dir, tracker_source)
+    upload_active = config.get("upload", {}).get("active", False)
+    if upload or upload_dry_run or upload_active:
+        if not torrent_path or not Path(torrent_path).exists():
+            announce("Upload requested but no torrent file is available. Create the torrent first and rerun.", "error")
+        else:
+            upload_manager = UploadManager(podcast, config, torrent_path)
+            try:
+                upload_manager.run(dry_run=upload_dry_run)
+            except Exception as error:
+                announce(f"Upload failed: {error}", "error")
+                log(error, "debug")
     podcast.db.close()
     move_folder = config.get("move", {}).get("active", False)
     move_folder_path = config.get("move", {}).get("path", None)
@@ -194,12 +206,16 @@ def create_torrent(podcast, announce_url, base_dir, tracker_source):
     """
     if not announce_url:
         announce(f"Skipping torrent creation for {podcast.name}, no announce URL provided", "info")
-        return
+        return None
     torrent_creator = TorrentCreator(podcast, announce_url, base_dir, tracker_source)
     total_size = sum(f.stat().st_size for f in podcast.folder_path.rglob('*') if f.is_file())
     piece_size = torrent_creator.calculate_piece_size(total_size)
     if ask_yes_no(f'Would you like to create the torrent now (piece size calcualted to {piece_size})'):
-        torrent_creator.create_torrent(piece_size)
+        return torrent_creator.create_torrent(piece_size)
+    existing_torrent = torrent_creator.get_torrent_path()
+    if existing_torrent.exists():
+        return existing_torrent
+    return None
 
 def make_torrent(input):
     """
@@ -256,6 +272,8 @@ if __name__ == "__main__":
     parser.add_argument("--before", type=str, help="Only include episodes published before this date (YYYY-MM-DD format)")
     parser.add_argument("--threads", type=int, help="Number of threads to use for podcast-dl downloading (overrides config setting)")
     parser.add_argument("--latest-episode-only", action="store_true", help="Only download the latest episode")
+    parser.add_argument("--upload", action="store_true", help="Run the configured upload backend after torrent creation")
+    parser.add_argument("--upload-dry-run", action="store_true", help="Validate upload auth, form data, and assets without submitting")
     args = parser.parse_args()
 
     if not config:
@@ -275,4 +293,19 @@ if __name__ == "__main__":
     elif args.check_config:
         check_config()
     else:
-        main(args.input, args.censor_rss, args.report_only, args.search_term, args.download_only, args.refresh, args.name, args.match_titles, args.after, args.before, args.threads, args.latest_episode_only)
+        main(
+            args.input,
+            args.censor_rss,
+            args.report_only,
+            args.search_term,
+            args.download_only,
+            args.refresh,
+            args.name,
+            args.match_titles,
+            args.after,
+            args.before,
+            args.threads,
+            args.latest_episode_only,
+            args.upload,
+            args.upload_dry_run,
+        )

@@ -55,6 +55,26 @@ move:
   ask: false # Whether to ask before moving
   path: /home/user/torrents # The path to move the folder to
 
+## Upload settings
+upload:
+  active: false # Whether to offer tracker upload after creating the torrent
+  ask: true # Whether to ask before submitting the prepared upload
+  backend: unit3d_web # Upload backend to use
+  base_url: https://unwalled.cc # Tracker base URL
+  cookie_file: data/cookies/UNW.txt # Netscape cookies.txt export for the tracker session
+  user_agent: Bulldozer uploader
+  require_images: true # Whether cover and banner files are required before submission
+  category_id: null # Tracker category ID
+  type_id: null # Tracker type ID
+  anonymous: false # Upload anonymously
+  personal_release: false # Only true if this is actually your own show
+  keywords: [] # Extra keywords to append to the upload
+  ads_removed: false # Add ads.removed and a description note
+  cover_path: null # Optional explicit path to the cover image
+  banner_path: null # Optional explicit path to the banner image
+  download_uploaded_torrent: true # Download the tracker-returned torrent after success
+  timeout: 60
+
 ## Cache settings
 cache:
   active: false # Whether to use the cache

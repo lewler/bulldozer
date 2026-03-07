@@ -15,6 +15,7 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 - Option to split active podcasts on current year (database required)
 - Partial download of feed using --match-titles
 - Torrent file creation with piece size calculation
+- Optional UNIT3D web upload with Netscape cookie auth, image preprocessing, and tracker-torrent download
 
 ## Requirements
 
@@ -61,6 +62,32 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 Edit the `config.yaml` file to set up your preferences and API keys. The configuration file includes pretty much all settings that are needed to customize the behavior of the script. The settings most users need to change are at the top of the configuration file. The file has comments, and it's hopefully easy enough to understand what everything does.
 
 Note that you do not need to copy the entire file, and you do not need to add values that you don't need to change. This approach means less work when new things are added to `config.default.yaml`.
+
+### UNIT3D Upload Configuration
+
+Bulldozer can now submit completed podcast uploads directly to a UNIT3D tracker such as Unwalled by using the normal web upload form. The upload stage is optional and disabled by default.
+
+Example override:
+
+```yaml
+upload:
+  active: true
+  backend: unit3d_web
+  base_url: https://unwalled.cc
+  cookie_file: data/cookies/UNW.txt
+  category_id: 12
+  type_id: 22
+  cover_path: null
+  banner_path: null
+  keywords:
+    - Patreon
+```
+
+Notes:
+- Export the tracker session cookies in Netscape `cookies.txt` format.
+- `category_id` and `type_id` must match options from the tracker's upload page.
+- For no-meta trackers like Unwalled, the uploader will require a square cover JPG and a 16:9 banner JPG unless `upload.require_images` is disabled.
+- After a successful upload, Bulldozer can download the tracker-returned `.torrent` file separately so you can seed with the tracker version.
 
 ## Upgrading
 
@@ -117,6 +144,8 @@ chmod +x bulldozer
 - `--before`: Will only keep episodes released before <input> in the feed (YYYY-MM-DD).
 - `--latest-episode-only`: Will only keep the newest episode in the feed.
 - `--threads`: Overrides the setting in config.yaml for the number of threads podcast-dl uses.
+- `--upload`: Runs the configured upload backend after torrent creation.
+- `--upload-dry-run`: Validates auth, title, keywords, images, and the prepared UNIT3D payload without submitting.
 
 ## Running With Docker
 

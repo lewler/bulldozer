@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta name="csrf-token" content="meta-token-fallback" />
+    <title>Upload - Unwalled</title>
+  </head>
+  <body>
+    <form id="upload-form" method="POST" action="https://unwalled.cc/upload" enctype="multipart/form-data">
+      <input type="hidden" name="_token" value="csrf-token-123" />
+      <input type="file" name="torrent" />
+      <input type="file" name="torrent-cover" />
+      <input type="file" name="torrent-banner" />
+      <select name="category_id" id="autocat">
+        <option hidden selected disabled value=""></option>
+        <option value="11">Comedy</option>
+        <option value="12">Science</option>
+      </select>
+      <select name="type_id" id="autotype">
+        <option hidden selected disabled value=""></option>
+        <option value="21">Free Audio</option>
+        <option value="22">Patreon Audio</option>
+      </select>
+    </form>
+  </body>
+</html>
