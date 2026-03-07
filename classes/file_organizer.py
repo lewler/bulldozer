@@ -387,6 +387,8 @@ class FileOrganizer:
         elif split == "yearly":
             new_name = f"{self.podcast.name} ({start_year})"
             new_folder_path = self.podcast.folder_path.parent / new_name
+            if not self.prepare_split_target(new_folder_path):
+                return None
             self.podcast.folder_path.rename(new_folder_path)
             self.podcast.folder_path = new_folder_path
             log(f"Renamed original folder to '{new_name}'", "debug")
@@ -396,14 +398,10 @@ class FileOrganizer:
             for year in range(start_year + 1, last_year + 1):
                 year_folder = self.podcast.folder_path.parent / f"{self.podcast.name} ({year})"
 
-                if year_folder.exists():
-                    log(f"Year folder '{year_folder}' already exists", "debug")
-                    if not ask_yes_no(f"'{year_folder.name}' already exists, proceed with split anyway?"):
-                        log("Skipping split check, user chose not to proceed - folder exists", "debug")
-                        continue
+                if not self.prepare_split_target(year_folder):
+                    continue
 
-                if not year_folder.exists():
-                    year_folder.mkdir()
+                year_folder.mkdir()
 
                 for date, year_list in self.podcast.analyzer.file_dates.items():
                     file_year = int(date[:4])
@@ -509,6 +507,27 @@ class FileOrganizer:
         self.podcast.metadata.duplicate(new_folder)
         self.podcast.image.duplicate(new_folder)
         self.podcast.rss.duplicate(new_folder)
+
+    def prepare_split_target(self, folder_path):
+        if not folder_path.exists():
+            return True
+
+        log(f"Split target '{folder_path}' already exists", "debug")
+        staging_runtime = self.config.get('_staging_runtime', {})
+        staging_config = self.config.get('staging', {})
+        auto_replace = (
+            staging_config.get('active')
+            and staging_config.get('overwrite', False)
+            and staging_runtime.get('active')
+        )
+        if not auto_replace:
+            if not ask_yes_no(f"'{folder_path.name}' already exists, replace it for this split?"):
+                log("Skipping split target replacement at user request", "debug")
+                return False
+
+        shutil.rmtree(folder_path)
+        log(f"Removed existing split target '{folder_path}'", "debug")
+        return True
 
     def organize_files(self, skip_split=False):
         """

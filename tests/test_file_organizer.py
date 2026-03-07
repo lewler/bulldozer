@@ -56,12 +56,20 @@ class FileOrganizerSplitTest(unittest.TestCase):
             name="Sample Podcast",
             folder_path=podcast_folder,
             analyzer=analyzer,
-            analyze_files=Mock(),
+            analyze_files=None,
             metadata=SimpleNamespace(duplicate=Mock()),
             image=SimpleNamespace(duplicate=Mock()),
             rss=SimpleNamespace(duplicate=Mock()),
             split_folder_paths=None,
         )
+
+        def analyze_files():
+            rebased = {}
+            for date, files in analyzer.file_dates.items():
+                rebased[date] = [podcast.folder_path / file_path.name for file_path in files]
+            analyzer.file_dates = rebased
+
+        podcast.analyze_files = Mock(side_effect=analyze_files)
         return podcast, old_file, current_file
 
     def patch_current_year(self, year):
@@ -152,6 +160,59 @@ class FileOrganizerSplitTest(unittest.TestCase):
                 organizer.check_split()
 
             self.assertEqual(choose_option.call_args.kwargs["default"], "yearly")
+
+    def test_check_split_yearly_replaces_existing_targets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast, old_file, current_file = self.make_podcast(temp_dir)
+            organizer = FileOrganizer(podcast, {"split": False})
+            stale_start_year = podcast.folder_path.parent / "Sample Podcast (2025)"
+            stale_current_year = podcast.folder_path.parent / "Sample Podcast (2026)"
+            stale_start_year.mkdir()
+            stale_current_year.mkdir()
+            (stale_start_year / "stale.txt").write_text("old")
+            (stale_current_year / "stale.txt").write_text("old")
+
+            with self.patch_current_year(2026), \
+                patch("classes.file_organizer.is_interactive_terminal", return_value=True), \
+                patch("classes.file_organizer.choose_option", return_value="yearly"), \
+                patch("classes.file_organizer.ask_yes_no", return_value=True) as ask_yes_no:
+                split_paths = organizer.check_split()
+
+            self.assertEqual(split_paths, [stale_start_year, stale_current_year])
+            self.assertTrue((stale_start_year / "2025 episode.mp3").exists())
+            self.assertTrue((stale_current_year / "2026 episode.mp3").exists())
+            self.assertFalse((stale_start_year / "stale.txt").exists())
+            self.assertFalse((stale_current_year / "stale.txt").exists())
+            self.assertEqual(ask_yes_no.call_count, 2)
+
+    def test_check_split_yearly_auto_replaces_existing_targets_during_staging(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast, _, _ = self.make_podcast(temp_dir)
+            organizer = FileOrganizer(
+                podcast,
+                {
+                    "split": False,
+                    "staging": {"active": True, "overwrite": True},
+                    "_staging_runtime": {"active": True},
+                },
+            )
+            stale_start_year = podcast.folder_path.parent / "Sample Podcast (2025)"
+            stale_current_year = podcast.folder_path.parent / "Sample Podcast (2026)"
+            stale_start_year.mkdir()
+            stale_current_year.mkdir()
+            (stale_start_year / "stale.txt").write_text("old")
+            (stale_current_year / "stale.txt").write_text("old")
+
+            with self.patch_current_year(2026), \
+                patch("classes.file_organizer.is_interactive_terminal", return_value=True), \
+                patch("classes.file_organizer.choose_option", return_value="yearly"), \
+                patch("classes.file_organizer.ask_yes_no") as ask_yes_no:
+                split_paths = organizer.check_split()
+
+            self.assertEqual(split_paths, [stale_start_year, stale_current_year])
+            self.assertTrue((stale_start_year / "2025 episode.mp3").exists())
+            self.assertTrue((stale_current_year / "2026 episode.mp3").exists())
+            ask_yes_no.assert_not_called()
 
 
 if __name__ == "__main__":

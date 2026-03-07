@@ -1,4 +1,7 @@
 import unittest
+from pathlib import Path
+
+from jinja2 import Template
 
 from classes.upload_context import build_upload_keywords, sanitize_public_source_url, sanitize_upload_title
 
@@ -28,6 +31,18 @@ class UploadContextHelpersTest(unittest.TestCase):
             sanitize_public_source_url("https://www.patreon.com/rss/wineaboutit?auth=secret&show=870432"),
             "https://www.patreon.com/wineaboutit",
         )
+
+    def test_name_unwalled_template_includes_year_for_split_packs(self):
+        template_path = Path(__file__).resolve().parent.parent / "templates" / "name-unwalled.tpl"
+        template = Template(template_path.read_text())
+        rendered = template.render(
+            name_clean="Wine About It",
+            start_year_str="2024",
+            end_year_str="2024",
+            file_format="M4A",
+            overall_bitrate="192kbps",
+        )
+        self.assertEqual(rendered, "Wine About It 2024 [M4A - 192kbps]")
 
 
 if __name__ == "__main__":

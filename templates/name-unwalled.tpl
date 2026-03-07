@@ -1,1 +1,1 @@
-{{ name_clean }} [{{ file_format }} - {{ overall_bitrate }}]
+{{ name_clean }} {% if end_year_str and end_year_str != start_year_str %}{{ start_year_str }} - {{ end_year_str }}{% elif start_year_str and start_year_str != "Unknown" %}{{ start_year_str }}{% else %}{{ end_year_str }}{% endif %} [{{ file_format }} - {{ overall_bitrate }}]
