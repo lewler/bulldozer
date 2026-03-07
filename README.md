@@ -12,7 +12,7 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 - Data fetching from Podnews
 - Automatic RSS censoring for matching premium sources
 - Optional local database with metadata for improved flexibility
-- Option to split active podcasts on current year (database required)
+- Option to split active podcasts on current year or yearly (database required), with an interactive suggestion when relevant
 - Partial download of feed using --match-titles
 - Torrent file creation with piece size calculation
 

@@ -8,6 +8,7 @@ import fnmatch
 import requests
 import platform
 import os
+import sys
 from datetime import datetime
 from contextlib import contextmanager
 from pathlib import Path
@@ -307,6 +308,42 @@ def ask_yes_no(question, allow_all=False):
             return True
         else:
             return False
+
+def is_interactive_terminal():
+    """
+    Check if Bulldozer is running in an interactive terminal session.
+
+    :return: True when both stdin and stdout are TTYs, otherwise False.
+    """
+    stdin = getattr(sys, "stdin", None)
+    stdout = getattr(sys, "stdout", None)
+    return bool(stdin and stdout and stdin.isatty() and stdout.isatty())
+
+def choose_option(question, options, default=None):
+    """
+    Ask the user to choose one option from a dict of value -> label.
+
+    :param question: The question to ask.
+    :param options: Mapping of option value to label.
+    :param default: Default option value to use when the user presses enter.
+    :return: The selected option value as a string.
+    """
+    if not options:
+        raise ValueError(f"No options available for: {question}")
+
+    announce(question, "info")
+    for option_value, label in options.items():
+        suffix = " [default]" if default is not None and str(option_value) == str(default) else ""
+        print(f"  {option_value}: {label}{suffix}")
+
+    while True:
+        prompt_suffix = f" [{default}]" if default is not None else ""
+        response = input(f"❓Enter choice{prompt_suffix}: ").strip()
+        if response == "" and default is not None:
+            return str(default)
+        if response in {str(option) for option in options}:
+            return str(response)
+        announce("Please enter one of the listed option IDs.", "warning")
         
 def take_input(prompt):
     """

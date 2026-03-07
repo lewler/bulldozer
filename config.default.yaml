@@ -65,6 +65,7 @@ cache:
 cutoff: .7
 
 # How should the podcast be split. Possible values are 'last_full_year', 'yearly', 'false'
+# When set to false, interactive runs can still suggest a split for active multi-year packs.
 split: last_full_year
 
 ## API Settings
