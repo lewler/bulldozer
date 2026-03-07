@@ -1,6 +1,6 @@
 import unittest
 
-from classes.upload_context import build_upload_keywords, sanitize_upload_title
+from classes.upload_context import build_upload_keywords, sanitize_public_source_url, sanitize_upload_title
 
 
 class UploadContextHelpersTest(unittest.TestCase):
@@ -13,13 +13,20 @@ class UploadContextHelpersTest(unittest.TestCase):
 
     def test_build_upload_keywords_normalizes_multiword_terms_and_ads_removed(self):
         keywords = build_upload_keywords(
-            config={"upload": {"keywords": ["Jack Black"], "ads_removed": True}},
             tags="comedy, society and culture",
             source_label="Patreon",
+            extra_keywords=["Jack Black"],
+            ads_removed=True,
         )
         self.assertEqual(
             keywords,
             ["comedy", "society.and.culture", "Jack.Black", "Patreon", "ads.removed"],
+        )
+
+    def test_sanitize_public_source_url_removes_private_patreon_rss_auth(self):
+        self.assertEqual(
+            sanitize_public_source_url("https://www.patreon.com/rss/wineaboutit?auth=secret&show=870432"),
+            "https://www.patreon.com/wineaboutit",
         )
 
 

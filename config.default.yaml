@@ -10,6 +10,9 @@ base_dir: null
 # The temporary name for a new download
 temp_dir_name: temp_download
 
+# Whether bulldozer should propose renaming local folders based on date heuristics
+rename_folder: true
+
 # Whether to include metadata in the upload
 include_metadata: true
 
@@ -41,10 +44,10 @@ tracker_source: null
 dupecheck: false
 
 # The API key to access the tracker
-api_key: andthisismyapikey
+api_key: null
 
 # The URL to check for duplicates
-dupecheck_url: https://tracker.com/api/torrents/filter
+dupecheck_url: null
 
 # How the RSS feed should be censored. Can be 'delete', 'edit'
 rss_censor_mode: delete
@@ -64,14 +67,6 @@ upload:
   cookie_file: data/cookies/UNW.txt # Netscape cookies.txt export for the tracker session
   user_agent: Bulldozer uploader
   require_images: true # Whether cover and banner files are required before submission
-  category_id: null # Tracker category ID
-  type_id: null # Tracker type ID
-  anonymous: false # Upload anonymously
-  personal_release: false # Only true if this is actually your own show
-  keywords: [] # Extra keywords to append to the upload
-  ads_removed: false # Add ads.removed and a description note
-  cover_path: null # Optional explicit path to the cover image
-  banner_path: null # Optional explicit path to the banner image
   download_uploaded_torrent: true # Download the tracker-returned torrent after success
   timeout: 60
 

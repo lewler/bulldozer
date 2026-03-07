@@ -21,29 +21,47 @@ class UploadContext:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class ReleaseProfile:
+    category_id: str | None = None
+    category_name: str | None = None
+    type_id: str | None = None
+    type_name: str | None = None
+    anonymous: bool = False
+    personal_release: bool = False
+    ads_removed: bool = False
+    extra_keywords: list[str] = field(default_factory=list)
+    source_label: str | None = None
+
+
 class UploadContextBuilder:
     def __init__(self, podcast, config):
         self.podcast = podcast
         self.config = config
         self.template = ReportTemplate(podcast, config)
 
-    def build(self, check_files_only=False):
+    def build(self, check_files_only=False, release_profile=None):
         data = self._build_data(check_files_only)
-        source_label = self._extract_source_label(data.get("premium_show", ""))
+        source_label = None
+        if release_profile and release_profile.source_label:
+            source_label = release_profile.source_label
+        if not source_label:
+            source_label = self._extract_source_label(data.get("premium_show", ""))
         raw_name = self.template.get_name(data) if data else None
         name = sanitize_upload_title(raw_name, source_label) if raw_name else None
         if name:
             data["name"] = name
 
         source_url = self._extract_source_url()
-        upload_notes = self._build_upload_notes(source_label, source_url)
+        upload_notes = self._build_upload_notes(source_label, source_url, release_profile)
         if upload_notes:
             data["upload_notes"] = upload_notes
 
         keywords = [] if check_files_only else build_upload_keywords(
-            config=self.config,
             tags=data.get("tags"),
             source_label=source_label,
+            extra_keywords=getattr(release_profile, "extra_keywords", None),
+            ads_removed=getattr(release_profile, "ads_removed", False),
         )
         keywords_string = ", ".join(keywords)
 
@@ -216,6 +234,8 @@ class UploadContextBuilder:
         external = self.podcast.metadata.external_data or {}
         candidates = [
             metadata.get("link"),
+            metadata.get("collectionViewUrl"),
+            metadata.get("itunesPageURL"),
             metadata.get("webUrl"),
             metadata.get("url"),
             metadata.get("feedUrl"),
@@ -227,16 +247,18 @@ class UploadContextBuilder:
         ]
         for candidate in candidates:
             if isinstance(candidate, str) and candidate.strip():
-                return candidate.strip()
+                public_url = sanitize_public_source_url(candidate)
+                if public_url:
+                    return public_url
         return None
 
-    def _build_upload_notes(self, source_label, source_url):
+    def _build_upload_notes(self, source_label, source_url, release_profile=None):
         lines = []
         if source_label:
             lines.append(f"[b]Source:[/b] {source_label}")
         if source_url:
             lines.append(f"[b]Source Link:[/b] [url={source_url}]{source_url}[/url]")
-        if self.config.get("upload", {}).get("ads_removed", False):
+        if getattr(release_profile, "ads_removed", False):
             lines.append("[b]Note:[/b] Adverts were removed by the uploader without transcoding.")
         return "\n".join(lines)
 
@@ -289,15 +311,15 @@ def sanitize_upload_title(title, source_label=None):
     return sanitized
 
 
-def build_upload_keywords(config, tags=None, source_label=None):
+def build_upload_keywords(tags=None, source_label=None, extra_keywords=None, ads_removed=False):
     values = []
     if tags:
         values.extend([item.strip() for item in tags.split(",") if item.strip()])
 
-    values.extend(config.get("upload", {}).get("keywords", []))
+    values.extend(extra_keywords or [])
     if source_label:
         values.append(source_label)
-    if config.get("upload", {}).get("ads_removed", False):
+    if ads_removed:
         values.append("ads.removed")
 
     normalized = []
@@ -331,3 +353,20 @@ def normalize_keyword(keyword):
 def _normalize_bitrate_label(value):
     normalized = re.sub(r"(\d+)\s+kbps", r"\1kbps", value.strip(), flags=re.IGNORECASE)
     return normalized
+
+
+def sanitize_public_source_url(url):
+    if not url:
+        return None
+
+    candidate = str(url).strip()
+    if not candidate:
+        return None
+
+    match = re.match(r"https?://(?:www\.)?patreon\.com/rss/([^/?#]+)", candidate, flags=re.IGNORECASE)
+    if match:
+        return f"https://www.patreon.com/{match.group(1)}"
+
+    sanitized = re.sub(r"([?&])(auth|token|key|apikey|api_key|rss_token)=[^&#]+", "", candidate, flags=re.IGNORECASE)
+    sanitized = sanitized.replace("?&", "?").rstrip("?&")
+    return sanitized

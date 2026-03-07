@@ -22,6 +22,8 @@ class ReportTemplate:
         if not self.template:
             log(f"Template {self.template_file} not found. Will only include description.", "warning")
             self.template = Template("{{ description }}")
+        with open("templates/simple.tpl", "r") as template_file:
+            self.simple_template = Template(template_file.read())
         with open(f"templates/{self.name_template_file}.tpl", "r") as template_file:
             self.name_template = Template(template_file.read())
         if not self.name_template:
@@ -61,4 +63,6 @@ class ReportTemplate:
         :param data: A dictionary containing key-value pairs that match placeholders in the template.
         :return: A string containing the rendered template.
         """
+        if self.template_file == "default" and not data.get("podchaser") and not data.get("podcastindex"):
+            return self.simple_template.render(data)
         return self.template.render(data)

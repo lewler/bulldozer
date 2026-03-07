@@ -5,8 +5,11 @@ from types import SimpleNamespace
 
 from PIL import Image
 
+from classes.upload_context import ReleaseProfile
 from classes.uploaders.unit3d_web import (
+    create_banner_from_cover,
     extract_csrf_token,
+    extract_upload_form_action,
     extract_success_links,
     extract_validation_errors,
     load_netscape_cookie_jar,
@@ -40,6 +43,7 @@ class Unit3DWebHelpersTest(unittest.TestCase):
     def test_extract_csrf_and_select_options_from_fixture(self):
         html = (FIXTURES / "unit3d_upload_page.html").read_text(encoding="utf-8")
         self.assertEqual(extract_csrf_token(html), "csrf-token-123")
+        self.assertEqual(extract_upload_form_action("https://unwalled.cc", html), "https://unwalled.cc/torrents")
         self.assertEqual(parse_select_options(html, "category_id"), {"11": "Comedy", "12": "Science"})
         self.assertEqual(parse_select_options(html, "type_id"), {"21": "Free Audio", "22": "Patreon Audio"})
 
@@ -57,7 +61,16 @@ class Unit3DWebHelpersTest(unittest.TestCase):
             "<html></html>",
         )
         self.assertEqual(details_url, "https://unwalled.cc/torrents/321")
-        self.assertEqual(download_url, "https://unwalled.cc/download/321")
+        self.assertEqual(download_url, "https://unwalled.cc/torrents/download/321")
+
+    def test_extract_success_links_prefers_download_link_in_html(self):
+        details_url, download_url = extract_success_links(
+            "https://unwalled.cc",
+            "https://unwalled.cc/torrents/321",
+            '<html><body><a href="/torrents/download/321">Download</a></body></html>',
+        )
+        self.assertEqual(details_url, "https://unwalled.cc/torrents/321")
+        self.assertEqual(download_url, "https://unwalled.cc/torrents/download/321")
 
     def test_prepare_cover_image_outputs_square_jpeg(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -88,6 +101,20 @@ class Unit3DWebHelpersTest(unittest.TestCase):
                 self.assertGreaterEqual(image.size[1], 540)
                 self.assertAlmostEqual(image.size[0] / image.size[1], 16 / 9, places=2)
 
+    def test_create_banner_from_cover_derives_valid_jpeg(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "cover.png"
+            output = Path(temp_dir) / "banner-upload.jpg"
+            Image.new("RGB", (1500, 1500), color=(210, 30, 90)).save(source)
+
+            create_banner_from_cover(source, output, size_budget=200_000)
+
+            self.assertTrue(output.exists())
+            self.assertLessEqual(output.stat().st_size, 200_000)
+            with Image.open(output) as image:
+                self.assertEqual(image.format, "JPEG")
+                self.assertEqual(image.size, (1280, 720))
+
     def test_build_payload_uses_unwalled_web_field_names(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             podcast = SimpleNamespace(
@@ -109,16 +136,22 @@ class Unit3DWebHelpersTest(unittest.TestCase):
                 "upload": {
                     "base_url": "https://unwalled.cc",
                     "cookie_file": "cookies.txt",
-                    "category_id": 11,
-                    "type_id": 22,
-                    "anonymous": False,
-                    "personal_release": False,
+                    "ask": False,
                 }
             }
 
             uploader = Unit3DWebUploader(podcast, config, upload_context, Path(temp_dir) / "test.torrent")
             try:
-                payload = uploader._build_payload("csrf-token-123", "11", "22")
+                uploader.release_profile = ReleaseProfile(
+                    category_id="11",
+                    category_name="Comedy",
+                    type_id="22",
+                    type_name="Patreon Audio",
+                    anonymous=False,
+                    personal_release=False,
+                    ads_removed=False,
+                )
+                payload = uploader._build_payload("csrf-token-123")
             finally:
                 uploader.cleanup()
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .upload_context import UploadContextBuilder
 from .uploaders import Unit3DWebUploader
-from .utils import announce, log
+from .utils import announce, ask_yes_no, log
 
 
 class UploadManager:
@@ -13,6 +13,8 @@ class UploadManager:
         self.upload_config = config.get("upload", {})
 
     def run(self, dry_run=False):
+        if not self.podcast.metadata.has_data:
+            self.podcast.metadata.load()
         upload_context = UploadContextBuilder(self.podcast, self.config).build()
         backend_name = self.upload_config.get("backend", "unit3d_web")
         if backend_name != "unit3d_web":
@@ -20,13 +22,13 @@ class UploadManager:
 
         uploader = Unit3DWebUploader(self.podcast, self.config, upload_context, self.torrent_path)
         try:
-            preparation = uploader.run_preflight()
-            self._print_preflight(upload_context, preparation, dry_run=dry_run)
+            preparation = uploader.run_preflight(dry_run=dry_run)
+            self._print_preflight(uploader.upload_context, preparation, dry_run=dry_run)
             if dry_run:
                 return
 
             should_ask = self.upload_config.get("ask", True)
-            if should_ask and not ask_yes_no(f"Upload {upload_context.name} to {self.upload_config.get('base_url')} now"):
+            if should_ask and not ask_yes_no(f"Upload {uploader.upload_context.name} to {self.upload_config.get('base_url')} now"):
                 announce("Upload cancelled.", "info")
                 return
 
@@ -55,6 +57,8 @@ class UploadManager:
         announce(f"Category: {preparation.category_name} ({preparation.payload['category_id']})", "info")
         announce(f"Type: {preparation.type_name} ({preparation.payload['type_id']})", "info")
         announce(f"Keywords: {preparation.payload['keywords'] or '(none)'}", "info")
+        announce(f"Anonymous: {'yes' if preparation.payload['anon'] == '1' else 'no'}", "info")
+        announce(f"Personal release: {'yes' if preparation.payload['personal_release'] == '1' else 'no'}", "info")
         announce(f"Torrent: {preparation.torrent_path}", "info")
         announce(f"Cover: {preparation.cover_path or '(none)'}", "info")
         announce(f"Banner: {preparation.banner_path or '(none)'}", "info")

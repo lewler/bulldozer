@@ -10,9 +10,10 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 
-from ..utils import ask_yes_no, take_input
+from ..upload_context import ReleaseProfile, UploadContextBuilder
+from ..utils import ask_yes_no, ask_yes_no_default, choose_option, take_input
 
 
 MAX_UPLOAD_BYTES = 950_000
@@ -42,6 +43,7 @@ class UploadPreparation:
     cover_path: Path | None = None
     banner_path: Path | None = None
     nfo_path: Path | None = None
+    release_profile: ReleaseProfile | None = None
 
 
 @dataclass
@@ -61,7 +63,7 @@ class Unit3DWebUploader:
         self.upload_context = upload_context
         self.upload_config = config.get("upload", {})
         self.base_url = self.upload_config.get("base_url", "").rstrip("/")
-        self.upload_url = urljoin(f"{self.base_url}/", "upload")
+        self.upload_page_urls = self._build_upload_page_urls()
         self.torrent_path = Path(torrent_path)
         self.timeout = self.upload_config.get("timeout", 60)
         self.user_agent = self.upload_config.get("user_agent", "Bulldozer uploader")
@@ -70,17 +72,17 @@ class Unit3DWebUploader:
         self.session.headers.update({"User-Agent": self.user_agent})
         self._temp_dir = tempfile.TemporaryDirectory(prefix="bulldozer-upload-")
         self.temp_dir = Path(self._temp_dir.name)
+        self.release_profile = None
+        self._asset_warnings = []
+        self._cover_source_path = None
 
     def cleanup(self):
         self._temp_dir.cleanup()
 
-    def run_preflight(self):
+    def run_preflight(self, dry_run=False):
+        self._asset_warnings = []
         self._load_session_cookies()
-        response = self.session.get(self.upload_url, timeout=self.timeout, allow_redirects=True)
-        if not response.ok:
-            raise ValueError(f"Failed to load upload page: HTTP {response.status_code}")
-        if self._looks_like_login_page(response.url, response.text):
-            raise ValueError("Upload page request appears unauthenticated. Check the exported cookie file.")
+        response, submit_url = self._load_upload_form_page()
 
         html = response.text
         csrf_token = extract_csrf_token(html)
@@ -89,13 +91,13 @@ class Unit3DWebUploader:
 
         category_options = parse_select_options(html, "category_id")
         type_options = parse_select_options(html, "type_id")
-        category_id = self._require_option_id("category_id", category_options)
-        type_id = self._require_option_id("type_id", type_options)
+        self.release_profile = self._resolve_release_profile(category_options, type_options, dry_run=dry_run)
+        self.upload_context = UploadContextBuilder(self.podcast, self.config).build(release_profile=self.release_profile)
 
         nfo_path = self._discover_nfo_path()
         cover_path = self._prepare_cover_image()
-        banner_path = self._prepare_banner_image(nfo_path=nfo_path, cover_path=cover_path)
-        payload = self._build_payload(csrf_token=csrf_token, category_id=category_id, type_id=type_id)
+        banner_path = self._prepare_banner_image(nfo_path=nfo_path, cover_path=cover_path, dry_run=dry_run)
+        payload = self._build_payload(csrf_token=csrf_token)
 
         if len(payload["name"]) > 255:
             raise ValueError("Upload title exceeds UNIT3D's 255 character limit.")
@@ -103,19 +105,21 @@ class Unit3DWebUploader:
             raise ValueError("Rendered description exceeds UNIT3D's 65535 character limit.")
 
         warnings = list(self.upload_context.warnings)
+        warnings.extend(self._asset_warnings)
         warnings.extend(self._build_size_warnings(nfo_path=nfo_path, cover_path=cover_path, banner_path=banner_path))
 
         return UploadPreparation(
             payload=payload,
             warnings=warnings,
-            category_name=category_options[str(category_id)],
-            type_name=type_options[str(type_id)],
+            category_name=self.release_profile.category_name,
+            type_name=self.release_profile.type_name,
             csrf_token=csrf_token,
-            upload_url=self.upload_url,
+            upload_url=submit_url,
             torrent_path=self.torrent_path,
             cover_path=cover_path,
             banner_path=banner_path,
             nfo_path=nfo_path,
+            release_profile=self.release_profile,
         )
 
     def submit(self, preparation):
@@ -199,29 +203,153 @@ class Unit3DWebUploader:
         cookie_jar = load_netscape_cookie_jar(cookie_file)
         self.session.cookies = cookie_jar
 
-    def _require_option_id(self, field_name, options):
-        configured_value = self.upload_config.get(field_name)
-        if configured_value is None:
-            available = ", ".join(f"{option_id}: {label}" for option_id, label in options.items())
-            raise ValueError(f"{field_name} is not configured. Available choices: {available}")
+    def _build_upload_page_urls(self):
+        configured_page_url = self.upload_config.get("page_url")
+        if configured_page_url:
+            return [configured_page_url]
 
-        configured_value = str(configured_value)
-        if configured_value not in options:
-            available = ", ".join(f"{option_id}: {label}" for option_id, label in options.items())
-            raise ValueError(f"Configured {field_name}={configured_value} is not valid. Available choices: {available}")
+        candidates = [
+            urljoin(f"{self.base_url}/", "upload"),
+            urljoin(f"{self.base_url}/", "torrents/create"),
+        ]
 
-        return configured_value
+        deduped = []
+        seen = set()
+        for candidate in candidates:
+            normalized = str(candidate).rstrip("/")
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(candidate)
+        return deduped
 
-    def _build_payload(self, csrf_token, category_id, type_id):
+    def _load_upload_form_page(self):
+        errors = []
+        for candidate_url in self.upload_page_urls:
+            response = self.session.get(candidate_url, timeout=self.timeout, allow_redirects=True)
+            if not response.ok:
+                errors.append(f"{candidate_url} -> HTTP {response.status_code}")
+                continue
+            if self._looks_like_login_page(response.url, response.text):
+                raise ValueError("Upload page request appears unauthenticated. Check the exported cookie file.")
+
+            submit_url = extract_upload_form_action(self.base_url, response.text)
+            if submit_url:
+                return response, submit_url
+
+            errors.append(f"{candidate_url} -> no upload form with a torrent field was found")
+
+        error_message = "; ".join(errors) if errors else "no candidate upload routes were tried"
+        raise ValueError(f"Failed to load a UNIT3D upload form. Tried: {error_message}")
+
+    def _resolve_release_profile(self, category_options, type_options, dry_run=False):
+        default_category_id = self._infer_category_id(category_options) or next(iter(category_options.keys()), None)
+        default_type_id = self._infer_type_id(type_options) or next(iter(type_options.keys()), None)
+        if default_category_id is None or default_type_id is None:
+            raise ValueError("The tracker upload form is missing category or type options.")
+
+        should_prompt = self.upload_config.get("ask", True) and not dry_run
+        category_id = default_category_id
+        type_id = default_type_id
+        anonymous = False
+        personal_release = False
+        ads_removed = False
+        extra_keywords = []
+
+        if should_prompt:
+            category_id = choose_option("Select tracker category", category_options, default=default_category_id)
+            type_id = choose_option("Select tracker type", type_options, default=default_type_id)
+            anonymous = ask_yes_no_default("Upload anonymously", default=False)
+            personal_release = ask_yes_no_default("Mark this as a personal release", default=False)
+            ads_removed = ask_yes_no_default("Were ads removed without transcoding", default=False)
+            extra_keywords = self._parse_extra_keywords(
+                take_input("Extra upload keywords (comma separated, blank for none)")
+            )
+
+        type_name = type_options[str(type_id)]
+        return ReleaseProfile(
+            category_id=str(category_id),
+            category_name=category_options[str(category_id)],
+            type_id=str(type_id),
+            type_name=type_name,
+            anonymous=anonymous,
+            personal_release=personal_release,
+            ads_removed=ads_removed,
+            extra_keywords=extra_keywords,
+            source_label=self._extract_source_label_from_type(type_name),
+        )
+
+    def _infer_category_id(self, options):
+        tags = self.podcast.metadata.get_tags() or ""
+        genres = (self.podcast.metadata.data or {}).get("genres", [])
+        hints = set()
+        for value in [self.podcast.name, tags, *genres]:
+            normalized = normalize_tokens(value)
+            if not normalized:
+                continue
+            hints.add(normalized)
+            if "society culture" in normalized or ("society" in normalized and "culture" in normalized):
+                hints.add("human interest")
+            if "personal journals" in normalized:
+                hints.add("human interest")
+
+        best_option = None
+        best_score = -1
+        for option_id, label in options.items():
+            normalized_label = normalize_tokens(label)
+            label_tokens = set(normalized_label.split())
+            score = 0
+            for hint in hints:
+                hint_tokens = set(hint.split())
+                overlap = len(label_tokens & hint_tokens)
+                if normalized_label == hint:
+                    score = max(score, 6)
+                elif hint in normalized_label or normalized_label in hint:
+                    score = max(score, 4 + overlap)
+                elif overlap:
+                    score = max(score, overlap)
+            if score > best_score:
+                best_score = score
+                best_option = option_id
+        return str(best_option) if best_option is not None and best_score > 0 else None
+
+    def _infer_type_id(self, options):
+        signals = [
+            self.upload_context.source_label or "",
+            self.upload_context.name or "",
+            self.podcast.name,
+            self.podcast.metadata.get_rss_feed() or "",
+        ]
+        for file_path in sorted(self.podcast.folder_path.iterdir())[:30]:
+            if file_path.is_file():
+                signals.append(file_path.stem)
+        joined = " ".join(signals).casefold()
+
+        for keyword in ("patreon", "nebula", "premium", "memberful", "substack"):
+            if keyword not in joined:
+                continue
+            for option_id, label in options.items():
+                if keyword in label.casefold():
+                    return str(option_id)
+
+        for option_id, label in options.items():
+            normalized_label = label.casefold()
+            if "audio" in normalized_label and "free" in normalized_label:
+                return str(option_id)
+        return next(iter(options.keys()), None)
+
+    def _build_payload(self, csrf_token):
+        if not self.release_profile:
+            raise ValueError("Release profile has not been resolved yet.")
         payload = {
             "_token": csrf_token,
             "name": self.upload_context.name or self.upload_context.raw_name or self.podcast.name,
-            "category_id": str(category_id),
-            "type_id": str(type_id),
+            "category_id": self.release_profile.category_id,
+            "type_id": self.release_profile.type_id,
             "description": self.upload_context.description,
             "keywords": self.upload_context.keywords_string,
-            "anon": "1" if self.upload_config.get("anonymous", False) else "0",
-            "personal_release": "1" if self.upload_config.get("personal_release", False) else "0",
+            "anon": "1" if self.release_profile.anonymous else "0",
+            "personal_release": "1" if self.release_profile.personal_release else "0",
         }
 
         mediainfo = self.upload_context.data.get("mediainfo", {})
@@ -236,24 +364,55 @@ class Unit3DWebUploader:
         cover_source = self._discover_cover_path()
         if not cover_source:
             if self.require_images:
-                raise ValueError("No cover image was found. Configure upload.cover_path or provide a cover file in Metadata/cover.* or cover.*.")
+                raise ValueError("No cover image was found automatically from the release files or remote metadata.")
             return None
 
+        self._cover_source_path = Path(cover_source)
         output_path = self.temp_dir / "cover-upload.jpg"
         prepare_cover_image(cover_source, output_path)
         return output_path
 
-    def _prepare_banner_image(self, nfo_path=None, cover_path=None):
+    def _prepare_banner_image(self, nfo_path=None, cover_path=None, dry_run=False):
         banner_source = self._discover_banner_path()
-        if not banner_source:
-            if self.require_images:
-                raise ValueError("No banner image was found. Configure upload.banner_path, place banner.* in the release folder, or provide one when prompted.")
-            return None
-
         output_path = self.temp_dir / "banner-upload.jpg"
         size_budget = self._calculate_banner_budget(nfo_path=nfo_path, cover_path=cover_path)
-        prepare_banner_image(banner_source, output_path, size_budget=size_budget)
-        return output_path
+        if banner_source:
+            prepare_banner_image(banner_source, output_path, size_budget=size_budget)
+            return output_path
+
+        cover_source = self._cover_source_path or cover_path
+        if cover_source:
+            create_banner_from_cover(cover_source, output_path, size_budget=size_budget)
+            self._asset_warnings.append("Banner image was auto-generated from the cover art because no widescreen artwork was found.")
+            return output_path
+
+        if self.upload_config.get("ask", True) and not dry_run:
+            entered_path = take_input("Banner image not found automatically. Enter a path to a local banner image")
+            resolved_path = self._resolve_path(entered_path)
+            if resolved_path:
+                prepare_banner_image(resolved_path, output_path, size_budget=size_budget)
+                return output_path
+
+        if self.require_images:
+            raise ValueError("No banner image was found or derivable automatically.")
+        return None
+
+    def _parse_extra_keywords(self, raw_value):
+        if not raw_value:
+            return []
+        return [keyword.strip() for keyword in raw_value.split(",") if keyword.strip()]
+
+    def _extract_source_label_from_type(self, type_name):
+        if not type_name:
+            return None
+        normalized = type_name.casefold()
+        if "patreon" in normalized:
+            return "Patreon"
+        if "nebula" in normalized:
+            return "Nebula"
+        if "premium" in normalized:
+            return "Premium"
+        return None
 
     def _calculate_banner_budget(self, nfo_path=None, cover_path=None):
         total_fixed_bytes = self.torrent_path.stat().st_size + UPLOAD_SAFETY_MARGIN_BYTES
@@ -269,10 +428,6 @@ class Unit3DWebUploader:
         return budget
 
     def _discover_cover_path(self):
-        configured_path = self._resolve_config_path(self.upload_config.get("cover_path"))
-        if configured_path:
-            return configured_path
-
         metadata_dir = self.podcast.folder_path / self.config.get("metadata_directory", "Metadata")
         candidates = [
             self._find_named_file(metadata_dir, ["cover.jpg", "cover.jpeg", "cover.png", "cover.webp", "cover.avif"]),
@@ -284,13 +439,12 @@ class Unit3DWebUploader:
         for candidate in candidates:
             if candidate and Path(candidate).exists():
                 return Path(candidate)
+        remote_cover = self._download_remote_image(self.podcast.metadata.get_image_url(), "cover-source")
+        if remote_cover:
+            return remote_cover
         return None
 
     def _discover_banner_path(self):
-        configured_path = self._resolve_config_path(self.upload_config.get("banner_path"))
-        if configured_path:
-            return configured_path
-
         metadata_dir = self.podcast.folder_path / self.config.get("metadata_directory", "Metadata")
         candidates = [
             self._find_named_file(metadata_dir, ["banner.jpg", "banner.jpeg", "banner.png", "banner.webp", "banner.avif"]),
@@ -300,8 +454,26 @@ class Unit3DWebUploader:
             if candidate and Path(candidate).exists():
                 return Path(candidate)
 
-        entered_path = take_input("Banner image not found automatically. Enter a path to a local banner image")
-        return self._resolve_config_path(entered_path)
+        remote_candidates = []
+        public_link = self.podcast.metadata.get_public_link() or self.upload_context.source_url
+        if public_link:
+            remote_candidates.extend(self._extract_page_image_candidates(public_link))
+        image_url = self.podcast.metadata.get_image_url()
+        if image_url:
+            remote_candidates.append(image_url)
+
+        seen = set()
+        for candidate_url in remote_candidates:
+            if not candidate_url:
+                continue
+            marker = candidate_url.strip()
+            if marker in seen:
+                continue
+            seen.add(marker)
+            downloaded = self._download_remote_image(candidate_url, "banner-source")
+            if downloaded and self._is_banner_candidate(downloaded):
+                return downloaded
+        return None
 
     def _discover_nfo_path(self):
         metadata_dir = self.podcast.folder_path / self.config.get("metadata_directory", "Metadata")
@@ -314,7 +486,7 @@ class Unit3DWebUploader:
                 return candidate
         return None
 
-    def _resolve_config_path(self, path_value):
+    def _resolve_path(self, path_value):
         if not path_value:
             return None
         candidate = Path(path_value).expanduser()
@@ -327,6 +499,55 @@ class Unit3DWebUploader:
             if resolved.exists():
                 return resolved
         return None
+
+    def _download_remote_image(self, image_url, prefix):
+        if not image_url:
+            return None
+        try:
+            response = self.session.get(image_url, timeout=self.timeout, allow_redirects=True)
+        except requests.RequestException:
+            return None
+        if not response.ok or not response.content:
+            return None
+        suffix = image_suffix_from_response(image_url, response.headers.get("Content-Type"))
+        output_path = self.temp_dir / f"{prefix}-{abs(hash(image_url))}{suffix}"
+        output_path.write_bytes(response.content)
+        return output_path
+
+    def _extract_page_image_candidates(self, page_url):
+        try:
+            response = self.session.get(page_url, timeout=self.timeout, allow_redirects=True)
+        except requests.RequestException:
+            return []
+        if not response.ok or "html" not in response.headers.get("Content-Type", "text/html"):
+            return []
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        candidates = []
+        selectors = [
+            ("meta", {"property": "og:image"}, "content"),
+            ("meta", {"name": "twitter:image"}, "content"),
+            ("link", {"rel": "image_src"}, "href"),
+        ]
+        for tag_name, attrs, value_key in selectors:
+            node = soup.find(tag_name, attrs=attrs)
+            if not node:
+                continue
+            value = node.get(value_key)
+            if value:
+                candidates.append(urljoin(page_url, value))
+        return candidates
+
+    def _is_banner_candidate(self, image_path):
+        try:
+            with Image.open(image_path) as image:
+                width, height = image.size
+        except Exception:
+            return False
+        if width < MIN_BANNER_SIZE[0] or height < MIN_BANNER_SIZE[1]:
+            return False
+        ratio = width / height
+        return 1.55 <= ratio <= 2.2
 
     def _find_named_file(self, directory, names):
         directory = Path(directory)
@@ -425,6 +646,16 @@ def parse_select_options(html, select_name):
     return options
 
 
+def extract_upload_form_action(base_url, html):
+    soup = BeautifulSoup(html, "html.parser")
+    for form in soup.find_all("form"):
+        if form.find("input", {"name": "torrent"}):
+            action = form.get("action")
+            if action:
+                return urljoin(f"{base_url}/", action)
+    return None
+
+
 def extract_validation_errors(html):
     soup = BeautifulSoup(html, "html.parser")
     errors = []
@@ -452,25 +683,57 @@ def extract_validation_errors(html):
 
 def extract_success_links(base_url, final_url, html):
     torrent_id = None
+    download_url = None
     final_url = str(final_url)
-    match = re.search(r"/download_check/(\d+)", final_url)
-    if match:
+
+    for pattern in (r"/download_check/(\d+)", r"/torrents/download/(\d+)", r"/download/(\d+)", r"/torrents/(\d+)"):
+        match = re.search(pattern, final_url)
+        if not match:
+            continue
         torrent_id = match.group(1)
+        if pattern in (r"/torrents/download/(\d+)", r"/download/(\d+)"):
+            download_url = urljoin(f"{base_url}/", final_url)
+        break
 
     if not torrent_id:
         soup = BeautifulSoup(html, "html.parser")
-        download_link = soup.find("a", href=re.compile(r"/download/\d+"))
-        if download_link and download_link.get("href"):
-            match = re.search(r"/download/(\d+)", download_link.get("href"))
-            if match:
-                torrent_id = match.group(1)
+        for pattern in (r"/torrents/download/(\d+)", r"/download/(\d+)"):
+            download_link = soup.find("a", href=re.compile(pattern))
+            if not download_link or not download_link.get("href"):
+                continue
+            match = re.search(pattern, download_link.get("href"))
+            if not match:
+                continue
+            torrent_id = match.group(1)
+            download_url = urljoin(f"{base_url}/", download_link.get("href"))
+            break
 
     if not torrent_id:
         return None, None
 
     details_url = urljoin(f"{base_url}/", f"torrents/{torrent_id}")
-    download_url = urljoin(f"{base_url}/", f"download/{torrent_id}")
+    if not download_url:
+        download_url = urljoin(f"{base_url}/", f"torrents/download/{torrent_id}")
     return details_url, download_url
+
+
+def normalize_tokens(value):
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold())).strip()
+
+
+def image_suffix_from_response(image_url, content_type):
+    suffix_map = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/avif": ".avif",
+    }
+    if content_type:
+        normalized = content_type.split(";")[0].strip().casefold()
+        if normalized in suffix_map:
+            return suffix_map[normalized]
+    suffix = Path(urlparse(image_url).path).suffix
+    return suffix if suffix else ".img"
 
 
 def prepare_cover_image(source_path, output_path):
@@ -490,6 +753,39 @@ def prepare_banner_image(source_path, output_path, size_budget):
         target_size=DEFAULT_BANNER_SIZE,
         min_size=MIN_BANNER_SIZE,
         size_budget=size_budget,
+    )
+
+
+def create_banner_from_cover(source_path, output_path, size_budget):
+    source_path = Path(source_path)
+    output_path = Path(output_path)
+    with Image.open(source_path) as image:
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        background = ImageOps.fit(image, DEFAULT_BANNER_SIZE, method=RESAMPLING_LANCZOS)
+        background = background.filter(ImageFilter.GaussianBlur(radius=20))
+
+        foreground = ImageOps.contain(image, (520, 520), method=RESAMPLING_LANCZOS)
+        canvas = background.copy()
+        x = (canvas.width - foreground.width) // 2
+        y = (canvas.height - foreground.height) // 2
+        shadow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        shadow_block = Image.new("RGBA", (foreground.width + 28, foreground.height + 28), (0, 0, 0, 120))
+        shadow.paste(shadow_block, (x - 14, y - 14))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(radius=14))
+        canvas = Image.alpha_composite(canvas.convert("RGBA"), shadow).convert("RGB")
+        canvas.paste(foreground, (x, y))
+
+        quality_values = list(range(DEFAULT_IMAGE_QUALITY, MIN_IMAGE_QUALITY - 1, -QUALITY_STEP))
+        size_candidates = [DEFAULT_BANNER_SIZE, (1152, 648), (1024, 576), MIN_BANNER_SIZE]
+        for width, height in size_candidates:
+            candidate = ImageOps.fit(canvas, (width, height), method=RESAMPLING_LANCZOS)
+            for quality in quality_values:
+                candidate.save(output_path, format="JPEG", quality=quality, optimize=True, progressive=True)
+                if output_path.stat().st_size <= size_budget:
+                    return output_path
+
+    raise ValueError(
+        f"Could not compress auto-generated banner derived from {source_path.name} below the required size budget ({size_budget} bytes)."
     )
 
 

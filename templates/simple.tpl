@@ -42,5 +42,8 @@ Tags: {{ tags }}
 {%- if links %}
 {{ links }}
 {% endif %}
+{%- if upload_notes %}
+{{ upload_notes }}
+{% endif %}
 
 --- Torrent Description ---

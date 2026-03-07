@@ -448,6 +448,9 @@ class FileOrganizer:
         """
         Rename the podcast folder based on the podcast name and date information.
         """
+        if not self.config.get('rename_folder', True):
+            return
+
         if '(' in self.podcast.folder_path.name:
             return
 

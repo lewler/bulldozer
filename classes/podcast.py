@@ -120,18 +120,23 @@ class Podcast:
 
         :return: True if there are no duplicates, False otherwise.
         """
-        if self.config.get('api_key') and self.config.get('dupecheck_url'):
-            term = self.search_term if self.search_term else self.name
-            log(f"Checking for duplicates using term: '{term}'", "info")
-            dupe_checker = DupeChecker(term, self.config.get('dupecheck_url'), self.config.get('api_key'))
-            progress = dupe_checker.check_duplicates()
-            if not progress:
-                log("User chose not to continue after duplicate check", "info")
-                self.cleanup_and_exit()
-            else:
-                log("Duplicate check completed, user chose to continue", "info")
-        else:
+        if not self.config.get('dupecheck', False):
+            log("Skipping duplicate check because 'dupecheck' is disabled in the config.", "info")
+            return
+
+        if not self.config.get('api_key') or not self.config.get('dupecheck_url'):
             log("Skipping duplicate check because 'api_key' or 'dupecheck_url' is not set in the config.", "info")
+            return
+
+        term = self.search_term if self.search_term else self.name
+        log(f"Checking for duplicates using term: '{term}'", "info")
+        dupe_checker = DupeChecker(term, self.config.get('dupecheck_url'), self.config.get('api_key'))
+        progress = dupe_checker.check_duplicates()
+        if not progress:
+            log("User chose not to continue after duplicate check", "info")
+            self.cleanup_and_exit()
+        else:
+            log("Duplicate check completed, user chose to continue", "info")
 
     def archive_files(self):
         """
