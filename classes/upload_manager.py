@@ -29,7 +29,10 @@ class UploadManager:
                 return
 
             should_ask = self.upload_config.get("ask", True)
-            if should_ask and not ask_yes_no(f"Upload {uploader.upload_context.name} to {self.upload_config.get('base_url')} now"):
+            if should_ask and not ask_yes_no(
+                f"Upload {uploader.upload_context.name} to {self.upload_config.get('base_url')} now",
+                default_yes=True,
+            ):
                 announce("Upload cancelled.", "info")
                 return
 

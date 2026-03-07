@@ -6,6 +6,7 @@ import argparse
 import shutil
 from pathlib import Path
 from classes.dupe_checker import DupeChecker
+from classes.file_organizer import FileOrganizer
 from classes.podcast import Podcast
 from classes.staging_manager import StagingManager
 from classes.torrent_creator import TorrentCreator
@@ -39,8 +40,15 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
         exit(1)
     
     database_active = config.get("database", {}).get("active", True)
+    config["_runtime"] = {
+        "upload_requested": bool(upload or config.get("upload", {}).get("active", False)),
+        "upload_dry_run": bool(upload_dry_run),
+        "client_active": bool(config.get("client", {}).get("active", False)),
+    }
 
-    if os.path.isdir(input):
+    input_is_local_dir = os.path.isdir(input)
+
+    if input_is_local_dir:
         source_folder_path = Path(input)
         if not name:
             name = source_folder_path.name
@@ -54,13 +62,12 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
             ]
         )
         folder_path = StagingManager(config).prepare(source_folder_path, display_name=name, force=should_stage)
-        check_duplicates = not report_only
         podcast = Podcast(
             name,
             folder_path,
             config,
             censor_rss=censor_rss,
-            check_duplicates=check_duplicates,
+            check_duplicates=False,
             search_term=search_term,
             source_is_local_folder=True,
         )
@@ -92,6 +99,69 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
     if download_only:
         announce(f"Podcast downloaded!", "celebrate")
         return
+    split_queue = prepare_split_queue(podcast, report_only, search_term, censor_rss) if input_is_local_dir else None
+    if split_queue:
+        podcast.db.close()
+        use_database = database_active and len(split_queue) == 1
+        for split_podcast in split_queue:
+            process_podcast(
+                split_podcast,
+                search_term=search_term,
+                report_only=report_only,
+                refresh=refresh,
+                database_active=use_database,
+                upload=upload,
+                upload_dry_run=upload_dry_run,
+                run_dupecheck=not report_only,
+                skip_split=True,
+            )
+        announce(f"All done, enjoy!", "celebrate")
+        return
+
+    process_podcast(
+        podcast,
+        search_term=search_term,
+        report_only=report_only,
+        refresh=refresh,
+        database_active=database_active,
+        upload=upload,
+        upload_dry_run=upload_dry_run,
+        run_dupecheck=not report_only and input_is_local_dir,
+        skip_split=False,
+    )
+    announce(f"All done, enjoy!", "celebrate")
+
+def prepare_split_queue(podcast, report_only, search_term, censor_rss):
+    if report_only:
+        return None
+
+    podcast.analyze_files()
+    organizer = FileOrganizer(podcast, config)
+    split_folder_paths = organizer.check_split()
+    if not split_folder_paths or len(split_folder_paths) <= 1:
+        return None
+
+    split_podcasts = []
+    for split_folder_path in split_folder_paths:
+        split_folder_path = Path(split_folder_path)
+        split_podcasts.append(
+            Podcast(
+                split_folder_path.name,
+                split_folder_path,
+                config,
+                censor_rss=censor_rss,
+                check_duplicates=False,
+                search_term=search_term,
+                source_is_local_folder=True,
+            )
+        )
+    announce(f"Prepared {len(split_podcasts)} split folders for sequential processing.", "info")
+    return split_podcasts
+
+def process_podcast(podcast, search_term=None, report_only=False, refresh=False, database_active=True, upload=False, upload_dry_run=False, run_dupecheck=False, skip_split=False):
+    if run_dupecheck:
+        podcast.check_for_duplicates()
+
     if database_active:
         podcast.load_from_database(refresh)
 
@@ -101,9 +171,9 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
         podcast.add_to_database(refresh)
 
     if not report_only:
-        podcast.organize_files()
-        
-    report  = Report(podcast, config)
+        podcast.organize_files(skip_split=skip_split)
+
+    report = Report(podcast, config)
     report_exists = report.check_if_report_exists()
     generate_report = True
     if report_exists:
@@ -117,51 +187,46 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
     if not podcast.metadata.has_data and generate_report:
         podcast.metadata.load(search_term)
     if not podcast.metadata.has_data and generate_report:
-        announce(f"Failed to load metadata for {name}, skipping report generation", "warning")
+        announce(f"Failed to load metadata for {podcast.folder_path.name}, skipping report generation", "warning")
     elif generate_report:
         if database_active:
             podcast.add_metadata_to_database()
         report.generate()
-        # Show the generated content summary before proceeding to torrent creation
         announce("Generated content summary:", "info")
         print("\n" + "=" * 70)
-        
-        # Show report location and full content
+
         report_path = report.get_file_path()
         if report_path and report_path.exists():
             announce(f"📄 Report: {report_path}", "info")
             log(f"Report file location: {report_path}", "info")
-            # Show full report content
             try:
-                with open(report_path, 'r', encoding='utf-8') as f:
-                    report_content = f.read()
+                with open(report_path, 'r', encoding='utf-8') as report_file:
+                    report_content = report_file.read()
                     if report_content:
                         print(f"\nFull report content:")
                         print("=" * 70)
                         print(report_content)
                         print("=" * 70)
-            except Exception as e:
-                log(f"Could not read report file: {e}", "debug")
-        
-        # Show image location if available
+            except Exception as error:
+                log(f"Could not read report file: {error}", "debug")
+
         image_path = podcast.image.get_file_path()
         if image_path and image_path.exists():
             announce(f"🖼️ Image: {image_path}", "info")
-        
-        # Show folder location
+
         announce(f"📁 Podcast folder: {podcast.folder_path}", "info")
-        
-        # Show episode count
         if hasattr(podcast, 'analyzer') and podcast.analyzer and hasattr(podcast.analyzer, 'original_files') and podcast.analyzer.original_files is not None:
             episode_count = len(podcast.analyzer.original_files)
         else:
             episode_count = 'unknown'
         announce(f"📊 Episodes: {episode_count}", "info")
-        
+
         print("=" * 70 + "\n")
+
     if report_only:
         podcast.db.close()
         return
+
     podcast.archive_files()
 
     announce_url = config.get("announce_url", None)
@@ -179,6 +244,7 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
             except Exception as error:
                 announce(f"Upload failed: {error}", "error")
                 log(error, "debug")
+
     podcast.db.close()
     move_folder = config.get("move", {}).get("active", False)
     move_folder_path = config.get("move", {}).get("path", None)
@@ -195,7 +261,6 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
                     announce(f"Moved folder to {new_folder_path}", "info")
             else:
                 announce(f"Move folder {move_folder_path} does not exist", "error")
-    announce(f"All done, enjoy!", "celebrate")
 
 def check_files(input):
     """
@@ -229,7 +294,15 @@ def create_torrent(podcast, announce_url, base_dir, tracker_source):
     torrent_creator = TorrentCreator(podcast, announce_url, base_dir, tracker_source)
     total_size = sum(f.stat().st_size for f in podcast.folder_path.rglob('*') if f.is_file())
     piece_size = torrent_creator.calculate_piece_size(total_size)
-    if ask_yes_no(f'Would you like to create the torrent now (piece size calcualted to {piece_size})'):
+    runtime_config = config.get("_runtime", {})
+    default_yes = any(
+        [
+            runtime_config.get("upload_requested", False),
+            runtime_config.get("upload_dry_run", False),
+            runtime_config.get("client_active", False),
+        ]
+    )
+    if ask_yes_no(f'Would you like to create the torrent now (piece size calcualted to {piece_size})', default_yes=default_yes):
         return torrent_creator.create_torrent(piece_size)
     existing_torrent = torrent_creator.get_torrent_path()
     if existing_torrent.exists():

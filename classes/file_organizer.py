@@ -8,6 +8,7 @@ from mutagen.easyid3 import EasyID3
 from mutagen.mp4 import MP4
 from .utils import spinner, titlecase_filename, announce, log, perform_replacements
 from .utils import format_last_date, ask_yes_no, take_input, normalize_string, reset_yes_to_all
+from .utils import choose_option, is_interactive_terminal
 
 class FileOrganizer:
     def __init__(self, podcast, config):
@@ -331,20 +332,20 @@ class FileOrganizer:
         """
         if self.podcast.completed:
             log("Skipping split check, podcast is marked as complete", "debug")
-            return
-        
+            return None
+
+        split_years = self.get_split_years()
+        if not split_years:
+            log("Skipping split check, podcast does not span multiple years", "debug")
+            return None
+        start_year, last_year, current_year = split_years
+
         split = self.config.get('split', False)
         if not split:
-            log("Skipping split check, split is false", "debug")
-            return
-
-        start_year = int(self.podcast.analyzer.earliest_year)
-        last_year = int(self.podcast.analyzer.last_episode_date[:4])
-        current_year = datetime.now().year
-
-        if (not start_year or not last_year) or start_year == last_year or last_year != current_year:
-            log("Skipping split check, podcast does not span multiple years", "debug")
-            return
+            split = self.suggest_split_mode(start_year, last_year, current_year)
+            if not split:
+                log("Skipping split check, split is false", "debug")
+                return None
 
         if split == "last_full_year":
             current_folder = self.podcast.folder_path.parent / f"{self.podcast.name} --CURRENT--"
@@ -381,6 +382,7 @@ class FileOrganizer:
             self.duplicate_metadata(current_folder)
             reset_yes_to_all()  # Reset "yes to all" flag after file overwrite section
             announce(f"Podcast split into two folders, current year is in folder appended with --CURRENT--", "info")
+            split_folder_paths = [self.podcast.folder_path, current_folder]
         
         elif split == "yearly":
             new_name = f"{self.podcast.name} ({start_year})"
@@ -426,21 +428,94 @@ class FileOrganizer:
             announce(f"Podcast split into folder for year {start_year}", "info")
 
             reset_yes_to_all()  # Reset "yes to all" flag after file overwrite section
+            split_folder_paths = [self.podcast.folder_path]
             for year in range(start_year + 1, last_year + 1):
                 year_folder = self.podcast.folder_path.parent / f"{self.podcast.name} ({year})"
                 self.duplicate_metadata(year_folder)
                 announce(f"Podcast split into folder for year {year}", "info")
+                split_folder_paths.append(year_folder)
+
+            self.podcast.split_folder_paths = split_folder_paths
+            return split_folder_paths
+
+        self.podcast.split_folder_paths = split_folder_paths
+        return split_folder_paths
+
+    def get_split_years(self):
+        """
+        Return split year context for active multi-year podcasts.
+
+        :return: Tuple of (start_year, last_year, current_year) or None when split is not relevant.
+        """
+        earliest_year = getattr(self.podcast.analyzer, 'earliest_year', None)
+        last_episode_date = getattr(self.podcast.analyzer, 'last_episode_date', None)
+        if not earliest_year or not last_episode_date:
+            return None
+
+        try:
+            start_year = int(earliest_year)
+            last_year = int(last_episode_date[:4])
+        except (TypeError, ValueError):
+            log("Skipping split check, could not parse episode years", "debug")
+            return None
+
+        current_year = datetime.now().year
+        if start_year == last_year or last_year != current_year:
+            return None
+
+        return start_year, last_year, current_year
+
+    def suggest_split_mode(self, start_year, last_year, current_year):
+        """
+        Offer an interactive split suggestion when split is disabled but relevant.
+
+        :param start_year: Earliest year in the analyzed files.
+        :param last_year: Latest year in the analyzed files.
+        :param current_year: The current year.
+        :return: Selected split mode or False when skipped/unavailable.
+        """
+        if not is_interactive_terminal():
+            log("Skipping split suggestion, not running interactively", "debug")
+            return False
+
+        runtime_config = self.config.get('_runtime', {})
+        automation_active = any(
+            [
+                runtime_config.get('upload_requested', False),
+                runtime_config.get('upload_dry_run', False),
+                self.config.get('upload', {}).get('active', False),
+                self.config.get('client', {}).get('active', False),
+            ]
+        )
+        default_mode = "yearly" if automation_active else "skip"
+
+        selection = choose_option(
+            f"'{self.podcast.name}' spans {start_year} to {last_year} and looks active. Would you like to split it?",
+            {
+                "skip": "Keep the folder as-is",
+                "last_full_year": f"Move {current_year} episodes into '{self.podcast.name} --CURRENT--'",
+                "yearly": "Create one folder per year",
+            },
+            default=default_mode,
+        )
+        if selection == "skip":
+            log("Skipping split check, user chose not to split", "debug")
+            return False
+
+        announce(f"Using split mode: {selection}", "info")
+        return selection
     
     def duplicate_metadata(self, new_folder):
         self.podcast.metadata.duplicate(new_folder)
         self.podcast.image.duplicate(new_folder)
         self.podcast.rss.duplicate(new_folder)
 
-    def organize_files(self):
+    def organize_files(self, skip_split=False):
         """
         Organize the episode files in the podcast folder.
         """
-        self.check_split()
+        if not skip_split:
+            self.check_split()
         self.rename_folder()
         with spinner("Organizing episode files") as spin:
             self.rename_files()

@@ -36,7 +36,7 @@ class ClientManager:
             raise ValueError(f"Unsupported torrent client backend: {backend_name}")
 
         if self.client_config.get("ask", True):
-            if not ask_yes_no(f"Inject {resolved_torrent_path.name} into qBittorrent now"):
+            if not ask_yes_no(f"Inject {resolved_torrent_path.name} into qBittorrent now", default_yes=True):
                 return ClientAddResult(success=False, status_message="Torrent client injection skipped.")
 
         client = QBittorrentClient(self.podcast, self.client_config)

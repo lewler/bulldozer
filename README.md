@@ -12,7 +12,7 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 - Data fetching from Podnews
 - Automatic RSS censoring for matching premium sources
 - Optional local database with metadata for improved flexibility
-- Option to split active podcasts on current year (database required)
+- Option to split active podcasts on current year or yearly, with an interactive suggestion when relevant
 - Partial download of feed using --match-titles
 - Torrent file creation with piece size calculation
 - Optional UNIT3D web upload with Netscape cookie auth, image preprocessing, and tracker-torrent download
@@ -92,6 +92,7 @@ Notes:
 - After a successful upload, Bulldozer can download the tracker-returned `.torrent` file separately so you can seed with the tracker version.
 - qBittorrent injection uses the parent of the processed folder as the save path so qBittorrent can recheck and seed the existing data.
 - qBittorrent credentials can be set in `client.username` / `client.password` or provided via `QBITTORRENT_USERNAME` / `QBITTORRENT_PASSWORD` or `QBT_USER` / `QBT_PASS`.
+- Interactive upload runs default the create-torrent and upload-confirmation prompts to yes so you can step through the flow with Enter.
 
 ### Local Folder Staging
 
@@ -112,6 +113,7 @@ Notes:
 - qBittorrent injection uses the staged folder, so the returned tracker torrent sees the same layout Bulldozer uploaded.
 - Hardlink staging skips in-place audio tag rewrites by default so the source library is not modified through shared inodes.
 - `staging.overwrite: true` replaces an existing staged folder with the same name before a new run.
+- When an active podcast spans multiple years and `split: false`, interactive upload/client runs suggest splitting automatically and default to `yearly` so a single root-folder run can queue one upload per year.
 
 ## Upgrading
 

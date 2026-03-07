@@ -102,12 +102,12 @@ class Podcast:
             exit(1)
         log(f"Episode download completed successfully", "info")
 
-    def organize_files(self):
+    def organize_files(self, skip_split=False):
         """
         Organize the podcast files.
         """
         organizer = FileOrganizer(self, self.config)
-        organizer.organize_files()
+        organizer.organize_files(skip_split=skip_split)
 
     def analyze_files(self):
         """
