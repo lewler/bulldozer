@@ -75,19 +75,21 @@ upload:
   backend: unit3d_web
   base_url: https://unwalled.cc
   cookie_file: data/cookies/UNW.txt
-  category_id: 12
-  type_id: 22
-  cover_path: null
-  banner_path: null
-  keywords:
-    - Patreon
+  download_uploaded_torrent: true
+
+client:
+  active: true
+  backend: qbittorrent
+  url: http://127.0.0.1:8080
 ```
 
 Notes:
 - Export the tracker session cookies in Netscape `cookies.txt` format.
-- `category_id` and `type_id` must match options from the tracker's upload page.
+- Tracker category, type, anonymity, personal release, ads-removed, and extra keywords are resolved at runtime during the upload flow.
 - For no-meta trackers like Unwalled, the uploader will require a square cover JPG and a 16:9 banner JPG unless `upload.require_images` is disabled.
 - After a successful upload, Bulldozer can download the tracker-returned `.torrent` file separately so you can seed with the tracker version.
+- qBittorrent injection uses the parent of the processed folder as the save path so qBittorrent can recheck and seed the existing data.
+- qBittorrent credentials can be set in `client.username` / `client.password` or provided via `QBITTORRENT_USERNAME` / `QBITTORRENT_PASSWORD` or `QBT_USER` / `QBT_PASS`.
 
 ## Upgrading
 

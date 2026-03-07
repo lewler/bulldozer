@@ -70,6 +70,20 @@ upload:
   download_uploaded_torrent: true # Download the tracker-returned torrent after success
   timeout: 60
 
+## Torrent client settings
+client:
+  active: false # Whether to offer torrent-client injection after a successful upload
+  ask: true # Whether to ask before injecting the tracker torrent into the client
+  backend: qbittorrent # Torrent client backend to use
+  url: null # qBittorrent WebUI URL, or set QBITTORRENT_URL/QBT_API_URL in the environment
+  username: null # qBittorrent username, or set QBITTORRENT_USERNAME/QBT_USER in the environment
+  password: null # qBittorrent password, or set QBITTORRENT_PASSWORD/QBT_PASS in the environment
+  category: null # Optional qBittorrent category to set on added torrents
+  tags: [] # Optional qBittorrent tags to set on added torrents
+  paused: false # Add the torrent paused instead of starting immediately
+  skip_checking: false # Skip qBittorrent's recheck when the data already exists
+  timeout: 30
+
 ## Cache settings
 cache:
   active: false # Whether to use the cache

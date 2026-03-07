@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .client_manager import ClientManager
 from .upload_context import UploadContextBuilder
 from .uploaders import Unit3DWebUploader
 from .utils import announce, ask_yes_no, log
@@ -40,6 +41,15 @@ class UploadManager:
             announce(result.status_message, "celebrate")
             if result.tracker_torrent_path:
                 announce(f"Tracker torrent saved to {result.tracker_torrent_path}", "info")
+            client_torrent_path = result.tracker_torrent_path or self.torrent_path
+            try:
+                client_result = ClientManager(self.podcast, self.config).run(client_torrent_path)
+            except Exception as error:
+                announce(f"Torrent client injection failed: {error}", "warning")
+                log(error, "debug")
+            else:
+                if client_result and client_result.status_message:
+                    announce(client_result.status_message, "info")
             return result
 
         if result.validation_errors:

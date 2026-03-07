@@ -48,7 +48,7 @@ class Report:
 
         with spinner("Generating report") as spin:
             context = UploadContextBuilder(self.podcast, self.config).build(check_files_only)
-            with open(output_filename, 'w') as f:
+            with open(output_filename, 'w', encoding='utf-8') as f:
                 log(f"Writing report to {output_filename}", "debug")
-                f.write(context.description)
+                f.write(context.report_text)
         spin.ok("✔")

@@ -13,6 +13,7 @@ class UploadContext:
     data: dict
     name: str | None
     raw_name: str | None
+    report_text: str
     description: str
     keywords: list[str] = field(default_factory=list)
     keywords_string: str = ""
@@ -67,12 +68,14 @@ class UploadContextBuilder:
         keywords_string = ", ".join(keywords)
 
         warnings = [] if check_files_only else self._build_warnings()
-        description = self.template.render(data).lstrip("\n")
+        report_text = self.template.render(data).lstrip("\n")
+        description = self.template.render_tracker_description(data).lstrip("\n")
 
         return UploadContext(
             data=data,
             name=name,
             raw_name=raw_name,
+            report_text=report_text,
             description=description,
             keywords=keywords,
             keywords_string=keywords_string,
