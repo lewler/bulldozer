@@ -8,6 +8,7 @@ from PIL import Image
 from classes.upload_context import ReleaseProfile
 from classes.uploaders.unit3d_web import (
     create_banner_from_cover,
+    parse_category_metadata,
     extract_csrf_token,
     extract_form_defaults,
     extract_upload_form_action,
@@ -47,6 +48,18 @@ class Unit3DWebHelpersTest(unittest.TestCase):
         self.assertEqual(extract_upload_form_action("https://unwalled.cc", html), "https://unwalled.cc/torrents")
         self.assertEqual(parse_select_options(html, "category_id"), {"11": "Comedy", "12": "Science"})
         self.assertEqual(parse_select_options(html, "type_id"), {"21": "Free Audio", "22": "Patreon Audio"})
+
+    def test_parse_category_metadata_decodes_unit3d_cats_payload(self):
+        html = """
+        <div x-data="{ cats: JSON.parse(atob('eyIxMSI6eyJuYW1lIjoiQ29tZWR5IiwidHlwZSI6Im5vIn0sIjQyIjp7Im5hbWUiOiJUViIsInR5cGUiOiJ0diJ9fQ==')) }"></div>
+        """
+        self.assertEqual(
+            parse_category_metadata(html),
+            {
+                "11": {"name": "Comedy", "type": "no"},
+                "42": {"name": "TV", "type": "tv"},
+            },
+        )
 
     def test_extract_form_defaults_prefers_hidden_defaults_over_empty_text_inputs(self):
         html = """
@@ -164,6 +177,7 @@ class Unit3DWebHelpersTest(unittest.TestCase):
                 uploader.release_profile = ReleaseProfile(
                     category_id="11",
                     category_name="Comedy",
+                    category_kind="no",
                     type_id="22",
                     type_name="Patreon Audio",
                     anonymous=False,
@@ -189,8 +203,10 @@ class Unit3DWebHelpersTest(unittest.TestCase):
             self.assertEqual(payload["sd"], "0")
             self.assertEqual(payload["tmdb"], "0")
             self.assertEqual(payload["mal"], "0")
-            self.assertEqual(payload["season_number"], "0")
-            self.assertEqual(payload["episode_number"], "0")
+            self.assertEqual(payload["tvdb"], "0")
+            self.assertEqual(payload["igdb"], "0")
+            self.assertNotIn("season_number", payload)
+            self.assertNotIn("episode_number", payload)
             self.assertIn("320 kb/s", payload["mediainfo"])
 
 

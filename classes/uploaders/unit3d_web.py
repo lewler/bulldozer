@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import http.cookiejar
+import json
 import re
 import tempfile
 from dataclasses import dataclass, field
@@ -89,10 +91,16 @@ class Unit3DWebUploader:
         if not csrf_token:
             raise ValueError("Could not extract a CSRF token from the UNIT3D upload page.")
         form_defaults = extract_form_defaults(html)
+        category_metadata = parse_category_metadata(html)
 
         category_options = parse_select_options(html, "category_id")
         type_options = parse_select_options(html, "type_id")
-        self.release_profile = self._resolve_release_profile(category_options, type_options, dry_run=dry_run)
+        self.release_profile = self._resolve_release_profile(
+            category_options,
+            type_options,
+            category_metadata,
+            dry_run=dry_run,
+        )
         self.upload_context = UploadContextBuilder(self.podcast, self.config).build(release_profile=self.release_profile)
 
         nfo_path = self._discover_nfo_path()
@@ -243,7 +251,7 @@ class Unit3DWebUploader:
         error_message = "; ".join(errors) if errors else "no candidate upload routes were tried"
         raise ValueError(f"Failed to load a UNIT3D upload form. Tried: {error_message}")
 
-    def _resolve_release_profile(self, category_options, type_options, dry_run=False):
+    def _resolve_release_profile(self, category_options, type_options, category_metadata=None, dry_run=False):
         default_category_id = self._infer_category_id(category_options) or next(iter(category_options.keys()), None)
         default_type_id = self._infer_type_id(type_options) or next(iter(type_options.keys()), None)
         if default_category_id is None or default_type_id is None:
@@ -271,6 +279,7 @@ class Unit3DWebUploader:
         return ReleaseProfile(
             category_id=str(category_id),
             category_name=category_options[str(category_id)],
+            category_kind=(category_metadata or {}).get(str(category_id), {}).get("type"),
             type_id=str(type_id),
             type_name=type_name,
             anonymous=anonymous,
@@ -354,15 +363,33 @@ class Unit3DWebUploader:
             "personal_release": "1" if self.release_profile.personal_release else "0",
         })
 
-        payload.setdefault("stream", "0")
-        payload.setdefault("sd", "0")
-        payload.setdefault("tmdb", "0")
-        payload.setdefault("imdb", "0")
-        payload.setdefault("tvdb", "0")
-        payload.setdefault("mal", "0")
-        payload.setdefault("igdb", "0")
-        payload["season_number"] = self._infer_season_number()
-        payload["episode_number"] = self._infer_episode_number()
+        category_kind = (self.release_profile.category_kind or "no").casefold()
+        if category_kind in {"movie", "tv"}:
+            payload["stream"] = payload.get("stream", "0")
+            payload["sd"] = payload.get("sd", "0")
+            payload["tmdb"] = self._normalize_numeric_field(payload.get("tmdb"), default="0")
+            payload["imdb"] = self._normalize_numeric_field(payload.get("imdb"), default="0")
+            payload["mal"] = self._normalize_numeric_field(payload.get("mal"), default="0")
+        else:
+            payload["stream"] = "0"
+            payload["sd"] = "0"
+            payload["tmdb"] = "0"
+            payload["imdb"] = "0"
+            payload["mal"] = "0"
+
+        if category_kind == "tv":
+            payload["tvdb"] = self._normalize_numeric_field(payload.get("tvdb"), default="0")
+            payload["season_number"] = self._infer_season_number()
+            payload["episode_number"] = self._infer_episode_number()
+        else:
+            payload["tvdb"] = "0"
+            payload.pop("season_number", None)
+            payload.pop("episode_number", None)
+
+        if category_kind == "game":
+            payload["igdb"] = self._normalize_numeric_field(payload.get("igdb"), default="0")
+        else:
+            payload["igdb"] = "0"
 
         mediainfo = self.upload_context.data.get("mediainfo", {})
         if isinstance(mediainfo, dict):
@@ -371,6 +398,14 @@ class Unit3DWebUploader:
             payload["mediainfo"] = ""
 
         return payload
+
+    def _normalize_numeric_field(self, value, default="0"):
+        if value in (None, "", []):
+            return default
+        value_str = str(value).strip()
+        if not value_str or not value_str.isdigit():
+            return default
+        return value_str
 
     def _infer_season_number(self):
         file_count = self.upload_context.data.get("number_of_files", 0)
@@ -679,6 +714,31 @@ def parse_select_options(html, select_name):
             continue
         options[str(value)] = label
     return options
+
+
+def parse_category_metadata(html):
+    match = re.search(r"cats:\s*JSON\.parse\(atob\('([^']+)'\)\)", html)
+    if not match:
+        return {}
+    try:
+        decoded = base64_decode_json(match.group(1))
+    except ValueError:
+        return {}
+    if not isinstance(decoded, dict):
+        return {}
+    metadata = {}
+    for key, value in decoded.items():
+        if isinstance(value, dict):
+            metadata[str(key)] = value
+    return metadata
+
+
+def base64_decode_json(encoded_value):
+    try:
+        raw = base64.b64decode(encoded_value).decode("utf-8")
+    except Exception as error:
+        raise ValueError(f"Failed to decode base64 JSON: {error}") from error
+    return json.loads(raw)
 
 
 def extract_upload_form_action(base_url, html):

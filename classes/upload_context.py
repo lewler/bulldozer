@@ -25,6 +25,7 @@ class UploadContext:
 class ReleaseProfile:
     category_id: str | None = None
     category_name: str | None = None
+    category_kind: str | None = None
     type_id: str | None = None
     type_name: str | None = None
     anonymous: bool = False
