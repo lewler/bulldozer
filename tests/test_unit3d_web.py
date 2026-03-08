@@ -209,6 +209,53 @@ class Unit3DWebHelpersTest(unittest.TestCase):
             self.assertNotIn("episode_number", payload)
             self.assertIn("320 kb/s", payload["mediainfo"])
 
+    def test_build_payload_omits_mediainfo_when_disabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast = SimpleNamespace(
+                name="Wine About It",
+                folder_path=Path(temp_dir),
+                image=SimpleNamespace(
+                    get_meta_file_path=lambda: Path(temp_dir) / "Metadata" / "Wine About It.jpg",
+                    get_file_path=lambda: Path(temp_dir) / "Wine About It.image.jpg",
+                ),
+            )
+            upload_context = SimpleNamespace(
+                name="Wine About It [2024/M4A - 192kbps]",
+                raw_name="Wine About It [2024/M4A - 192kbps]",
+                description="description text",
+                keywords_string="society, culture, Patreon",
+                data={"mediainfo": {"output": "Audio\nBit rate : 192 kb/s"}, "number_of_files": 12},
+            )
+            config = {
+                "upload": {
+                    "base_url": "https://unwalled.cc",
+                    "cookie_file": "cookies.txt",
+                    "ask": False,
+                    "include_mediainfo": False,
+                }
+            }
+
+            uploader = Unit3DWebUploader(podcast, config, upload_context, Path(temp_dir) / "test.torrent")
+            try:
+                uploader.release_profile = ReleaseProfile(
+                    category_id="11",
+                    category_name="Comedy",
+                    category_kind="no",
+                    type_id="22",
+                    type_name="Patreon Audio",
+                    anonymous=False,
+                    personal_release=False,
+                    ads_removed=False,
+                )
+                payload = uploader._build_payload(
+                    "csrf-token-123",
+                    form_defaults={"stream": "0", "sd": "0", "tmdb": "0", "mal": "0", "anon": "0"},
+                )
+            finally:
+                uploader.cleanup()
+
+            self.assertEqual(payload["mediainfo"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

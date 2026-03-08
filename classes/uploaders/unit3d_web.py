@@ -391,9 +391,12 @@ class Unit3DWebUploader:
         else:
             payload["igdb"] = "0"
 
-        mediainfo = self.upload_context.data.get("mediainfo", {})
-        if isinstance(mediainfo, dict):
-            payload["mediainfo"] = mediainfo.get("output", "")
+        if self.upload_config.get("include_mediainfo", True):
+            mediainfo = self.upload_context.data.get("mediainfo", {})
+            if isinstance(mediainfo, dict):
+                payload["mediainfo"] = mediainfo.get("output", "")
+            else:
+                payload["mediainfo"] = ""
         else:
             payload["mediainfo"] = ""
 

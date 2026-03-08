@@ -76,6 +76,7 @@ upload:
   cookie_file: data/cookies/UNW.txt # Netscape cookies.txt export for the tracker session
   user_agent: Bulldozer uploader
   require_images: true # Whether cover and banner files are required before submission
+  include_mediainfo: true # Whether to populate the tracker mediainfo field during upload
   download_uploaded_torrent: true # Download the tracker-returned torrent after success
   timeout: 60
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from .report_template import ReportTemplate
 from .utils import format_last_date, log
@@ -130,10 +131,18 @@ class UploadContextBuilder:
             file_format = file_format.upper()
 
         end_year_string = last_episode_date_str.split()[-1] if last_episode_date_str else ""
+        title_period_label = build_title_period_label(
+            start_year_str=start_year_str,
+            end_year_str=end_year_string,
+            first_episode_date=self.podcast.analyzer.first_episode_date,
+            last_episode_date=self.podcast.analyzer.last_episode_date,
+            completed=self.podcast.completed,
+        )
 
         data = {
             "start_year_str": start_year_str,
             "end_year_str": end_year_string,
+            "title_period_label": title_period_label,
             "first_episode_date": self.podcast.analyzer.first_episode_date,
             "real_first_episode_date": self.podcast.analyzer.real_first_episode_date,
             "last_episode_date": self.podcast.analyzer.last_episode_date,
@@ -315,6 +324,38 @@ def sanitize_upload_title(title, source_label=None):
     return sanitized
 
 
+def build_title_period_label(
+    start_year_str=None,
+    end_year_str=None,
+    first_episode_date=None,
+    last_episode_date=None,
+    completed=False,
+    current_year=None,
+):
+    start_year = _parse_year_value(start_year_str)
+    end_year = _parse_year_value(end_year_str) or start_year
+    if current_year is None:
+        current_year = datetime.utcnow().year
+
+    if start_year and end_year and start_year != end_year:
+        return f"{start_year}-{end_year}"
+
+    year = start_year or end_year
+    if not year:
+        return str(end_year_str or start_year_str or "").strip()
+
+    first_date = _parse_iso_date(first_episode_date)
+    last_date = _parse_iso_date(last_episode_date)
+    if not completed and year == current_year and first_date and last_date:
+        first_month = first_date.strftime("%B %Y")
+        last_month = last_date.strftime("%B %Y")
+        if first_month == last_month:
+            return first_month
+        return f"{first_month} - {last_month}"
+
+    return str(year)
+
+
 def build_upload_keywords(tags=None, source_label=None, extra_keywords=None, ads_removed=False):
     values = []
     if tags:
@@ -357,6 +398,24 @@ def normalize_keyword(keyword):
 def _normalize_bitrate_label(value):
     normalized = re.sub(r"(\d+)\s+kbps", r"\1kbps", value.strip(), flags=re.IGNORECASE)
     return normalized
+
+
+def _parse_year_value(value):
+    if value in (None, "", "Unknown"):
+        return None
+    match = re.search(r"\b(\d{4})\b", str(value))
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _parse_iso_date(value):
+    if value in (None, "", "Unknown"):
+        return None
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d")
+    except ValueError:
+        return None
 
 
 def sanitize_public_source_url(url):
