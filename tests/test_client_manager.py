@@ -76,6 +76,39 @@ class QBittorrentClientTest(unittest.TestCase):
         self.assertEqual(add_call.kwargs["data"]["skip_checking"], "false")
         self.assertIn("torrents", add_call.kwargs["files"])
 
+    def test_add_torrent_uses_configured_save_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            configured_save_path = temp_root / "grind"
+            podcast_folder = temp_root / "staging" / "The WAN Show 2025"
+            podcast_folder.mkdir(parents=True)
+            torrent_path = temp_root / "The WAN Show 2025.tracker.torrent"
+            torrent_path.write_bytes(b"d8:announce13:https://x/ee")
+
+            podcast = SimpleNamespace(folder_path=podcast_folder)
+            session = Mock()
+            session.post.side_effect = [
+                SimpleNamespace(status_code=200, text="Ok."),
+                SimpleNamespace(status_code=200, text="Ok."),
+            ]
+
+            with patch("classes.client_manager.requests.Session", return_value=session):
+                client = QBittorrentClient(
+                    podcast,
+                    {
+                        "url": "http://127.0.0.1:18080",
+                        "username": "admin",
+                        "password": "secret",
+                        "save_path": str(configured_save_path),
+                    },
+                )
+                result = client.add_torrent(torrent_path)
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.save_path, str(configured_save_path))
+        add_call = session.post.call_args_list[1]
+        self.assertEqual(add_call.kwargs["data"]["savepath"], str(configured_save_path))
+
 
 if __name__ == "__main__":
     unittest.main()

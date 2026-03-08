@@ -61,6 +61,25 @@ class StagingManagerTest(unittest.TestCase):
             self.assertTrue(manager.config["_staging_runtime"]["active"])
             self.assertEqual(manager.config["_staging_runtime"]["mode"], "hardlink")
 
+    def test_prepare_uses_client_save_path_when_staging_path_is_unset(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            source = temp_root / "Podcast"
+            source.mkdir()
+            (source / "episode1.m4a").write_bytes(b"episode-1")
+
+            client_save_path = temp_root / "grind"
+            manager = StagingManager(
+                {
+                    "staging": {"active": False, "mode": "hardlink"},
+                    "client": {"save_path": str(client_save_path)},
+                }
+            )
+            staged = manager.prepare(source, force=True)
+
+            self.assertEqual(staged, (client_save_path / "Podcast").resolve())
+            self.assertEqual((source / "episode1.m4a").stat().st_ino, (staged / "episode1.m4a").stat().st_ino)
+
 
 if __name__ == "__main__":
     unittest.main()

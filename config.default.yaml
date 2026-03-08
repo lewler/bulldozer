@@ -62,7 +62,7 @@ move:
 staging:
   active: false # Whether to always stage local-folder inputs before organizing them
   ask: false # Whether to ask before creating the staged working tree
-  path: null # Defaults to <source parent>/.bulldozer-staging when staging is forced and no path is set
+  path: null # Defaults to client.save_path when set, otherwise <source parent>/.bulldozer-staging
   mode: hardlink # hardlink or copy
   overwrite: true # Replace an existing staged tree with the same name
   protect_source_content: true # Skip in-place audio tag rewrites when staging via hardlinks
@@ -87,6 +87,7 @@ client:
   url: null # qBittorrent WebUI URL, or set QBITTORRENT_URL/QBT_API_URL in the environment
   username: null # qBittorrent username, or set QBITTORRENT_USERNAME/QBT_USER in the environment
   password: null # qBittorrent password, or set QBITTORRENT_PASSWORD/QBT_PASS in the environment
+  save_path: null # Optional qBittorrent save path; defaults to the processed folder's parent
   category: null # Optional qBittorrent category to set on added torrents
   tags: [] # Optional qBittorrent tags to set on added torrents
   paused: false # Add the torrent paused instead of starting immediately

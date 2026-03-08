@@ -83,6 +83,10 @@ client:
   active: true
   backend: qbittorrent
   url: http://127.0.0.1:8080
+  save_path: /mnt/Pool/Media/Torrents/grind
+  category: grind
+  tags:
+    - grind
 ```
 
 Notes:
@@ -90,7 +94,7 @@ Notes:
 - Tracker category, type, anonymity, personal release, ads-removed, and extra keywords are resolved at runtime during the upload flow.
 - For no-meta trackers like Unwalled, the uploader will require a square cover JPG and a 16:9 banner JPG unless `upload.require_images` is disabled.
 - After a successful upload, Bulldozer can download the tracker-returned `.torrent` file separately so you can seed with the tracker version.
-- qBittorrent injection uses the parent of the processed folder as the save path so qBittorrent can recheck and seed the existing data.
+- qBittorrent injection uses `client.save_path` when set, otherwise the parent of the processed folder, so qBittorrent can recheck and seed the existing data.
 - qBittorrent credentials can be set in `client.username` / `client.password` or provided via `QBITTORRENT_USERNAME` / `QBITTORRENT_PASSWORD` or `QBT_USER` / `QBT_PASS`.
 - Interactive upload runs default the create-torrent and upload-confirmation prompts to yes so you can step through the flow with Enter.
 
@@ -109,7 +113,8 @@ staging:
 
 Notes:
 - `staging.mode: hardlink` creates a seedable working tree without duplicating the underlying media data.
-- If `staging.path` is not set and staging is forced by upload or client injection, Bulldozer stages into a sibling `.bulldozer-staging` folder next to the source input.
+- If `staging.path` is not set and `client.save_path` is set, Bulldozer stages directly into that save path so qBittorrent can seed the prepared tree without an extra hidden staging root.
+- If neither `staging.path` nor `client.save_path` is set and staging is forced by upload or client injection, Bulldozer stages into a sibling `.bulldozer-staging` folder next to the source input.
 - qBittorrent injection uses the staged folder, so the returned tracker torrent sees the same layout Bulldozer uploaded.
 - Hardlink staging skips in-place audio tag rewrites by default so the source library is not modified through shared inodes.
 - `staging.overwrite: true` replaces an existing staged folder with the same name before a new run.

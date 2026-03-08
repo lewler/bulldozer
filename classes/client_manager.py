@@ -50,6 +50,7 @@ class QBittorrentClient:
         self.base_url = self._resolve_setting("url", ["QBITTORRENT_URL", "QBT_API_URL"])
         self.username = self._resolve_setting("username", ["QBITTORRENT_USERNAME", "QBT_USER"])
         self.password = self._resolve_setting("password", ["QBITTORRENT_PASSWORD", "QBT_PASS"])
+        self.save_path = self._resolve_setting("save_path", ["QBITTORRENT_SAVE_PATH", "QBT_SAVE_PATH"])
         self.timeout = int(client_config.get("timeout", 30))
         self.category = client_config.get("category")
         self.tags = normalize_tags(client_config.get("tags", []))
@@ -61,7 +62,7 @@ class QBittorrentClient:
         self._validate()
         self._login()
 
-        save_path = str(self.podcast.folder_path.parent)
+        save_path = self._determine_save_path()
         data = {
             "savepath": save_path,
             "autoTMM": "false",
@@ -115,6 +116,14 @@ class QBittorrentClient:
 
     def _build_url(self, path):
         return urljoin(f"{self.base_url.rstrip('/')}/", path)
+
+    def _determine_save_path(self):
+        if self.save_path:
+            candidate = Path(self.save_path).expanduser()
+            if not candidate.is_absolute():
+                candidate = (self.podcast.folder_path.parent / candidate).resolve()
+            return str(candidate)
+        return str(self.podcast.folder_path.parent)
 
     def _resolve_setting(self, key, env_names):
         value = self.client_config.get(key)

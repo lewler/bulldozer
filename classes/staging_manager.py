@@ -64,6 +64,10 @@ class StagingManager:
             staging_root = Path(configured_path).expanduser()
             if not staging_root.is_absolute():
                 staging_root = Path.cwd() / staging_root
+        elif self.config.get("client", {}).get("save_path"):
+            staging_root = Path(self.config["client"]["save_path"]).expanduser()
+            if not staging_root.is_absolute():
+                staging_root = Path.cwd() / staging_root
         else:
             staging_root = source_path.parent / ".bulldozer-staging"
         staging_root.mkdir(parents=True, exist_ok=True)
