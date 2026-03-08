@@ -45,7 +45,8 @@ class ClientManager:
         if backend_name != "qbittorrent":
             raise ValueError(f"Unsupported torrent client backend: {backend_name}")
 
-        if self.client_config.get("ask", True):
+        runtime_config = self.config.get("_runtime", {})
+        if self.client_config.get("ask", True) and not runtime_config.get("split_auto_apply_remaining", False):
             if not ask_yes_no(
                 f"Inject {resolved_torrent_path.name} into qBittorrent now",
                 default_yes=prompt_default_yes,

@@ -271,7 +271,12 @@ class Unit3DWebUploader:
         if default_category_id is None or default_type_id is None:
             raise ValueError("The tracker upload form is missing category or type options.")
 
-        should_prompt = self.upload_config.get("ask", True) and not dry_run
+        runtime_config = self.config.get("_runtime", {})
+        should_prompt = (
+            self.upload_config.get("ask", True)
+            and not dry_run
+            and not runtime_config.get("split_auto_apply_remaining", False)
+        )
         category_id = default_category_id
         type_id = default_type_id
         anonymous = bool(prompt_defaults.get("anonymous", False))

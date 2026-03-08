@@ -14,8 +14,11 @@ from classes.process_resume import build_redo_plan
 from classes.split_run_state import (
     backfill_completed_folders,
     bind_runtime_split_state,
+    enable_split_auto_apply,
+    get_split_auto_apply_redo_plan,
     get_split_folder_paths,
     initialize_split_state,
+    is_split_auto_apply_active,
     load_split_state,
     mark_split_folder_client_injected,
     mark_split_folder_processed,
@@ -56,6 +59,9 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
         "upload_requested": bool(upload or config.get("upload", {}).get("active", False)),
         "upload_dry_run": bool(upload_dry_run),
         "client_active": bool(config.get("client", {}).get("active", False)),
+        "split_auto_apply_remaining": False,
+        "split_auto_apply_redo_plan": {},
+        "split_auto_apply_prompted": False,
     }
 
     input_is_local_dir = os.path.isdir(input)
@@ -126,8 +132,14 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
         if 'podcast' in locals():
             podcast.db.close()
         use_database = database_active and len(split_queue) == 1
-        for split_podcast in split_queue:
-            process_podcast(
+        automation_active = bool(
+            upload
+            or upload_dry_run
+            or config.get("upload", {}).get("active", False)
+            or config.get("client", {}).get("active", False)
+        )
+        for index, split_podcast in enumerate(split_queue):
+            process_result = process_podcast(
                 split_podcast,
                 search_term=search_term,
                 report_only=report_only,
@@ -138,6 +150,22 @@ def main(input, censor_rss, report_only=False, search_term=None, download_only=F
                 run_dupecheck=not report_only,
                 skip_split=True,
             )
+            remaining = len(split_queue) - index - 1
+            runtime = config.get("_runtime", {})
+            if (
+                remaining > 0
+                and automation_active
+                and is_interactive_terminal()
+                and not runtime.get("split_auto_apply_prompted", False)
+                and process_result.get("success", False)
+            ):
+                if ask_yes_no(
+                    f"Would you like to automatically apply this year's choices to the remaining {remaining} year(s)?",
+                    default_yes=False,
+                ):
+                    enable_split_auto_apply(config, process_result.get("redo_plan"))
+                    announce("Will automatically apply this year's choices to the remaining years.", "info")
+                runtime["split_auto_apply_prompted"] = True
         announce(f"All done, enjoy!", "celebrate")
         return
 
@@ -262,6 +290,7 @@ def announce_existing_step_status(step_status, upload_requested=False, client_ac
             announce(f"Torrent client save path: {step_status.client_save_path}", "info")
 
 def process_podcast(podcast, search_term=None, report_only=False, refresh=False, database_active=True, upload=False, upload_dry_run=False, run_dupecheck=False, skip_split=False):
+    process_success = True
     if run_dupecheck:
         podcast.check_for_duplicates()
 
@@ -295,7 +324,15 @@ def process_podcast(podcast, search_term=None, report_only=False, refresh=False,
     redo_torrent = False
     redo_upload = False
     redo_client = False
-    if step_status.any_prior_step and is_interactive_terminal():
+    auto_apply_active = is_split_auto_apply_active(config)
+    if step_status.any_prior_step and auto_apply_active:
+        redo_plan = get_split_auto_apply_redo_plan(config)
+        redo_processing = bool(redo_plan.get("redo_processing", False) and step_status.processed)
+        redo_report = bool(redo_plan.get("redo_report", False) and step_status.report_exists)
+        redo_torrent = bool(redo_plan.get("redo_torrent", False) and step_status.local_torrent_exists)
+        redo_upload = bool(redo_plan.get("redo_upload", False) and upload_requested and step_status.upload_exists)
+        redo_client = bool(redo_plan.get("redo_client", False) and client_active and step_status.client_present)
+    elif step_status.any_prior_step and is_interactive_terminal():
         redo_mode = choose_option(
             f"How would you like to handle completed steps for {step_status.label_text}?",
             {
@@ -396,7 +433,16 @@ def process_podcast(podcast, search_term=None, report_only=False, refresh=False,
 
     if report_only:
         podcast.db.close()
-        return
+        return {
+            "success": process_success,
+            "redo_plan": {
+                "redo_processing": redo_processing,
+                "redo_report": redo_report,
+                "redo_torrent": redo_torrent,
+                "redo_upload": redo_upload,
+                "redo_client": redo_client,
+            },
+        }
 
     if should_process or generate_report:
         podcast.archive_files()
@@ -447,10 +493,14 @@ def process_podcast(podcast, search_term=None, report_only=False, refresh=False,
         else:
             upload_manager = UploadManager(podcast, config, torrent_path)
             try:
-                upload_manager.run(dry_run=upload_dry_run)
+                upload_result = upload_manager.run(dry_run=upload_dry_run)
             except Exception as error:
                 announce(f"Upload failed: {error}", "error")
                 log(error, "debug")
+                process_success = False
+            else:
+                if upload_result is not None and getattr(upload_result, "success", True) is False:
+                    process_success = False
     elif client_active:
         client_torrent_path = step_status.tracker_torrent_path or torrent_path
         if step_status.client_present and not redo_client:
@@ -464,11 +514,14 @@ def process_podcast(podcast, search_term=None, report_only=False, refresh=False,
             except Exception as error:
                 announce(f"Torrent client injection failed: {error}", "warning")
                 log(error, "debug")
+                process_success = False
             else:
                 if client_result and client_result.status_message:
                     announce(client_result.status_message, "info")
                 if client_result and client_result.success:
                     mark_split_folder_client_injected(config, podcast.folder_path, client_result=client_result)
+                elif client_result and not client_result.success:
+                    process_success = False
 
     podcast.db.close()
     move_folder = config.get("move", {}).get("active", False)
@@ -486,6 +539,16 @@ def process_podcast(podcast, search_term=None, report_only=False, refresh=False,
                     announce(f"Moved folder to {new_folder_path}", "info")
             else:
                 announce(f"Move folder {move_folder_path} does not exist", "error")
+    return {
+        "success": process_success,
+        "redo_plan": {
+            "redo_processing": redo_processing,
+            "redo_report": redo_report,
+            "redo_torrent": redo_torrent,
+            "redo_upload": redo_upload,
+            "redo_client": redo_client,
+        },
+    }
 
 def check_files(input):
     """
@@ -527,6 +590,10 @@ def create_torrent(podcast, announce_url, base_dir, tracker_source, replace_exis
             runtime_config.get("client_active", False),
         ]
     )
+    if runtime_config.get("split_auto_apply_remaining", False):
+        if replace_existing is None:
+            replace_existing = True
+        return torrent_creator.create_torrent(piece_size, replace_existing=replace_existing)
     if ask_yes_no(f'Would you like to create the torrent now (piece size calcualted to {piece_size})', default_yes=default_yes):
         return torrent_creator.create_torrent(piece_size, replace_existing=replace_existing)
     existing_torrent = torrent_creator.get_torrent_path()

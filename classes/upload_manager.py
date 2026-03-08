@@ -29,7 +29,8 @@ class UploadManager:
             if dry_run:
                 return
 
-            should_ask = self.upload_config.get("ask", True)
+            runtime_config = self.config.get("_runtime", {})
+            should_ask = self.upload_config.get("ask", True) and not runtime_config.get("split_auto_apply_remaining", False)
             if should_ask and not ask_yes_no(
                 f"Upload {uploader.upload_context.name} to {self.upload_config.get('base_url')} now",
                 default_yes=True,

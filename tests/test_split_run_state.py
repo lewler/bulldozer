@@ -6,10 +6,13 @@ from types import SimpleNamespace
 from classes.split_run_state import (
     backfill_completed_folders,
     bind_runtime_split_state,
+    enable_split_auto_apply,
+    get_split_auto_apply_redo_plan,
     get_split_folder_paths,
     get_remaining_split_paths,
     get_split_state_path,
     initialize_split_state,
+    is_split_auto_apply_active,
     load_split_state,
     mark_split_folder_completed,
     mark_split_folder_processed,
@@ -178,6 +181,23 @@ class SplitRunStateTest(unittest.TestCase):
 
             self.assertEqual(existing, [split_a, split_c])
             self.assertEqual(missing, [split_b])
+
+    def test_enable_split_auto_apply_sets_runtime_plan(self):
+        config = {"_runtime": {}}
+
+        plan = enable_split_auto_apply(
+            config,
+            {
+                "redo_processing": True,
+                "redo_report": True,
+                "redo_torrent": False,
+                "redo_upload": True,
+                "redo_client": False,
+            },
+        )
+
+        self.assertTrue(is_split_auto_apply_active(config))
+        self.assertEqual(plan, get_split_auto_apply_redo_plan(config))
 
 
 if __name__ == "__main__":

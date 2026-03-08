@@ -396,6 +396,54 @@ class Unit3DWebHelpersTest(unittest.TestCase):
                 },
             )
 
+    def test_resolve_release_profile_skips_prompts_when_split_auto_apply_is_active(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast = SimpleNamespace(
+                name="Wine About It",
+                folder_path=Path(temp_dir),
+                metadata=SimpleNamespace(get_tags=lambda: "", data={}, get_rss_feed=lambda: ""),
+            )
+            upload_context = SimpleNamespace(source_label=None, name="Wine About It", raw_name="Wine About It")
+            config = {
+                "upload": {
+                    "base_url": "https://unwalled.cc",
+                    "cookie_file": "cookies.txt",
+                    "ask": True,
+                },
+                "_runtime": {
+                    "split_auto_apply_remaining": True,
+                    "upload_prompt_defaults": {
+                        "category_id": "31",
+                        "type_id": "7",
+                        "anonymous": True,
+                        "personal_release": False,
+                        "ads_removed": False,
+                        "extra_keywords": ["wine.about.it"],
+                    },
+                },
+            }
+
+            uploader = Unit3DWebUploader(podcast, config, upload_context, Path(temp_dir) / "test.torrent")
+            try:
+                with patch("classes.uploaders.unit3d_web.choose_option") as choose_option, patch(
+                    "classes.uploaders.unit3d_web.ask_yes_no_default"
+                ) as ask_yes_no_default, patch("classes.uploaders.unit3d_web.take_input") as take_input:
+                    profile = uploader._resolve_release_profile(
+                        {"6": "Comedy", "31": "Human Interest"},
+                        {"7": "Audio - Patreon", "9": "Audio - Free"},
+                        dry_run=False,
+                    )
+            finally:
+                uploader.cleanup()
+
+            choose_option.assert_not_called()
+            ask_yes_no_default.assert_not_called()
+            take_input.assert_not_called()
+            self.assertEqual(profile.category_id, "31")
+            self.assertEqual(profile.type_id, "7")
+            self.assertTrue(profile.anonymous)
+            self.assertEqual(profile.extra_keywords, ["wine.about.it"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from classes.client_manager import QBittorrentClient, compute_v1_torrent_infohash
+from classes.client_manager import ClientManager, ClientAddResult, QBittorrentClient, compute_v1_torrent_infohash
 
 
 class QBittorrentClientTest(unittest.TestCase):
@@ -200,6 +200,33 @@ class QBittorrentClientTest(unittest.TestCase):
         inspect_call = session.get.call_args
         self.assertEqual(inspect_call.args[0], "http://127.0.0.1:18080/api/v2/torrents/info")
         self.assertEqual(inspect_call.kwargs["params"], {"hashes": "b0d0f9cbeb6b6b687f6dbd04c6e88818054b6738"})
+
+    def test_client_manager_skips_confirmation_when_split_auto_apply_is_active(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast_folder = Path(temp_dir) / "The WAN Show (2020)"
+            podcast_folder.mkdir()
+            torrent_path = Path(temp_dir) / "The WAN Show (2020).tracker.torrent"
+            torrent_path.write_bytes(self.make_torrent_bytes())
+            podcast = SimpleNamespace(folder_path=podcast_folder)
+            config = {
+                "_runtime": {"split_auto_apply_remaining": True},
+                "client": {
+                    "active": True,
+                    "ask": True,
+                    "backend": "qbittorrent",
+                },
+            }
+
+            with patch("classes.client_manager.ask_yes_no") as ask_yes_no, patch.object(
+                QBittorrentClient,
+                "add_torrent",
+                return_value=ClientAddResult(success=True, status_message="ok"),
+            ) as add_torrent, patch.object(QBittorrentClient, "_validate"), patch.object(QBittorrentClient, "_login"):
+                result = ClientManager(podcast, config).run(torrent_path)
+
+        ask_yes_no.assert_not_called()
+        add_torrent.assert_called_once()
+        self.assertTrue(result.success)
 
 
 if __name__ == "__main__":

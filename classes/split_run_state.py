@@ -82,6 +82,27 @@ def bind_runtime_split_state(config, state_path, state=None):
     return state
 
 
+def enable_split_auto_apply(config, redo_plan=None):
+    runtime = config.setdefault("_runtime", {})
+    runtime["split_auto_apply_remaining"] = True
+    runtime["split_auto_apply_redo_plan"] = dict(redo_plan or {})
+    return runtime["split_auto_apply_redo_plan"]
+
+
+def disable_split_auto_apply(config):
+    runtime = config.setdefault("_runtime", {})
+    runtime["split_auto_apply_remaining"] = False
+    runtime["split_auto_apply_redo_plan"] = {}
+
+
+def is_split_auto_apply_active(config):
+    return bool((config.get("_runtime") or {}).get("split_auto_apply_remaining", False))
+
+
+def get_split_auto_apply_redo_plan(config):
+    return dict((config.get("_runtime") or {}).get("split_auto_apply_redo_plan") or {})
+
+
 def get_split_folder_record(config, folder_path):
     runtime = config.get("_runtime", {})
     split_state_runtime = runtime.get("split_state") or {}
