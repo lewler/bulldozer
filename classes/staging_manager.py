@@ -4,6 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
+from .split_run_state import get_split_state_path
 from .utils import announce, ask_yes_no, log
 
 
@@ -19,7 +20,7 @@ class StagingManager:
             self._store_runtime(False, None, source_path, source_path)
             return source_path
 
-        staging_root = self._resolve_staging_root(source_path)
+        staging_root = self.resolve_staging_root(source_path)
         if source_path == staging_root or staging_root in source_path.parents:
             log(f"Skipping staging because {source_path} is already inside {staging_root}", "info")
             self._store_runtime(False, None, source_path, source_path)
@@ -58,7 +59,7 @@ class StagingManager:
         announce(f"Staged local folder to {target_path} using {mode} mode", "info")
         return target_path
 
-    def _resolve_staging_root(self, source_path):
+    def resolve_staging_root(self, source_path):
         configured_path = self.staging_config.get("path")
         if configured_path:
             staging_root = Path(configured_path).expanduser()
@@ -72,6 +73,10 @@ class StagingManager:
             staging_root = source_path.parent / ".bulldozer-staging"
         staging_root.mkdir(parents=True, exist_ok=True)
         return staging_root.resolve()
+
+    def resolve_split_state_path(self, source_path, display_name):
+        staging_root = self.resolve_staging_root(Path(source_path).expanduser().resolve())
+        return get_split_state_path(staging_root, display_name)
 
     def _remove_existing_target(self, target_path):
         if target_path.is_dir() and not target_path.is_symlink():

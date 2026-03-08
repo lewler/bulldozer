@@ -347,11 +347,11 @@ def build_title_period_label(
     first_date = _parse_iso_date(first_episode_date)
     last_date = _parse_iso_date(last_episode_date)
     if not completed and year == current_year and first_date and last_date:
-        first_month = first_date.strftime("%B %Y")
-        last_month = last_date.strftime("%B %Y")
-        if first_month == last_month:
-            return first_month
-        return f"{first_month} - {last_month}"
+        first_month_name = first_date.strftime("%B")
+        last_month_with_year = last_date.strftime("%B %Y")
+        if first_date.strftime("%Y-%m") == last_date.strftime("%Y-%m"):
+            return f"{year} {first_month_name}"
+        return f"{year} {first_month_name} - {last_month_with_year}"
 
     return str(year)
 

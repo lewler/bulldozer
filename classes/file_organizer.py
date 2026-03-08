@@ -346,6 +346,7 @@ class FileOrganizer:
             if not split:
                 log("Skipping split check, split is false", "debug")
                 return None
+        self.podcast.split_mode = split
 
         if split == "last_full_year":
             current_folder = self.podcast.folder_path.parent / f"{self.podcast.name} --CURRENT--"

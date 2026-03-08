@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .client_manager import ClientManager
+from .split_run_state import mark_split_folder_client_injected, mark_split_folder_completed
 from .upload_context import UploadContextBuilder
 from .uploaders import Unit3DWebUploader
 from .utils import announce, ask_yes_no, log
@@ -41,6 +42,7 @@ class UploadManager:
             uploader.cleanup()
 
         if result.success:
+            mark_split_folder_completed(self.config, self.podcast.folder_path, result=result)
             announce(result.status_message, "celebrate")
             if result.tracker_torrent_path:
                 announce(f"Tracker torrent saved to {result.tracker_torrent_path}", "info")
@@ -53,6 +55,8 @@ class UploadManager:
             else:
                 if client_result and client_result.status_message:
                     announce(client_result.status_message, "info")
+                if client_result and client_result.success:
+                    mark_split_folder_client_injected(self.config, self.podcast.folder_path, client_result=client_result)
             return result
 
         if result.validation_errors:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,15 @@ class ClientAddResult:
     success: bool
     status_message: str = ""
     save_path: str | None = None
+    infohash: str | None = None
+
+
+@dataclass
+class ClientInspectResult:
+    present: bool
+    infohash: str | None = None
+    save_path: str | None = None
+    status_message: str = ""
 
 
 class ClientManager:
@@ -23,7 +33,7 @@ class ClientManager:
         self.config = config
         self.client_config = config.get("client", {})
 
-    def run(self, torrent_path):
+    def run(self, torrent_path, prompt_default_yes=True):
         if not self.client_config.get("active", False):
             return None
 
@@ -36,11 +46,29 @@ class ClientManager:
             raise ValueError(f"Unsupported torrent client backend: {backend_name}")
 
         if self.client_config.get("ask", True):
-            if not ask_yes_no(f"Inject {resolved_torrent_path.name} into qBittorrent now", default_yes=True):
+            if not ask_yes_no(
+                f"Inject {resolved_torrent_path.name} into qBittorrent now",
+                default_yes=prompt_default_yes,
+            ):
                 return ClientAddResult(success=False, status_message="Torrent client injection skipped.")
 
         client = QBittorrentClient(self.podcast, self.client_config)
         return client.add_torrent(resolved_torrent_path)
+
+    def inspect(self, torrent_path):
+        if not self.client_config.get("active", False):
+            return None
+
+        resolved_torrent_path = Path(torrent_path) if torrent_path else None
+        if not resolved_torrent_path or not resolved_torrent_path.exists():
+            return None
+
+        backend_name = self.client_config.get("backend", "qbittorrent")
+        if backend_name != "qbittorrent":
+            raise ValueError(f"Unsupported torrent client backend: {backend_name}")
+
+        client = QBittorrentClient(self.podcast, self.client_config)
+        return client.inspect_torrent(resolved_torrent_path)
 
 
 class QBittorrentClient:
@@ -61,6 +89,7 @@ class QBittorrentClient:
     def add_torrent(self, torrent_path):
         self._validate()
         self._login()
+        infohash = compute_v1_torrent_infohash(Path(torrent_path))
 
         save_path = self._determine_save_path()
         data = {
@@ -94,6 +123,34 @@ class QBittorrentClient:
             success=True,
             status_message=f"Injected tracker torrent into qBittorrent using save path {save_path}",
             save_path=save_path,
+            infohash=infohash,
+        )
+
+    def inspect_torrent(self, torrent_path):
+        self._validate()
+        self._login()
+        infohash = compute_v1_torrent_infohash(Path(torrent_path))
+        response = self.session.get(
+            self._build_url("api/v2/torrents/info"),
+            params={"hashes": infohash},
+            timeout=self.timeout,
+        )
+        if response.status_code >= 400:
+            raise ValueError(f"qBittorrent torrent inspection failed: HTTP {response.status_code}")
+
+        items = response.json() if response.text else []
+        if items:
+            save_path = items[0].get("save_path")
+            return ClientInspectResult(
+                present=True,
+                infohash=infohash,
+                save_path=save_path,
+                status_message=f"Torrent already exists in qBittorrent with infohash {infohash}",
+            )
+        return ClientInspectResult(
+            present=False,
+            infohash=infohash,
+            status_message=f"Torrent is not present in qBittorrent for infohash {infohash}",
         )
 
     def _login(self):
@@ -144,3 +201,47 @@ def normalize_tags(tags):
 
 def to_qbittorrent_bool(value):
     return "true" if value else "false"
+
+
+def compute_v1_torrent_infohash(torrent_path):
+    data = Path(torrent_path).read_bytes()
+    if not data.startswith(b"d"):
+        raise ValueError(f"Torrent file is not bencoded: {torrent_path}")
+
+    index = 1
+    while index < len(data) and data[index:index + 1] != b"e":
+        key, index = _parse_bencoded_bytes(data, index)
+        value_start = index
+        index = _skip_bencoded_value(data, index)
+        if key == b"info":
+            return hashlib.sha1(data[value_start:index]).hexdigest()
+
+    raise ValueError(f"Torrent file {torrent_path} does not contain an info dictionary")
+
+
+def _parse_bencoded_bytes(data, index):
+    colon_index = data.index(b":", index)
+    length = int(data[index:colon_index])
+    value_start = colon_index + 1
+    value_end = value_start + length
+    return data[value_start:value_end], value_end
+
+
+def _skip_bencoded_value(data, index):
+    marker = data[index:index + 1]
+    if marker == b"i":
+        return data.index(b"e", index) + 1
+    if marker == b"l" or marker == b"d":
+        index += 1
+        if marker == b"d":
+            while data[index:index + 1] != b"e":
+                _, index = _parse_bencoded_bytes(data, index)
+                index = _skip_bencoded_value(data, index)
+            return index + 1
+        while data[index:index + 1] != b"e":
+            index = _skip_bencoded_value(data, index)
+        return index + 1
+    if marker.isdigit():
+        _, end_index = _parse_bencoded_bytes(data, index)
+        return end_index
+    raise ValueError("Invalid bencoded value")

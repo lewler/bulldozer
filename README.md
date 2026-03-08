@@ -119,6 +119,12 @@ Notes:
 - Hardlink staging skips in-place audio tag rewrites by default so the source library is not modified through shared inodes.
 - `staging.overwrite: true` replaces an existing staged folder with the same name before a new run.
 - When an active podcast spans multiple years and `split: false`, interactive upload/client runs suggest splitting automatically and default to `yearly` so a single root-folder run can queue one upload per year.
+- Yearly split runs now persist a small split-state file in the staging root so rerunning the same root-folder command can skip years that already uploaded successfully and continue from the next unfinished year.
+- If that split-state file does not exist yet but earlier yearly uploads already produced tracker-returned `.tracker.torrent` files, Bulldozer now backfills completion state from those artifacts on the first rerun and resumes instead of restarting from year one.
+- During a yearly upload run, the last selected tracker category, type, anonymity, personal-release, ads-removed, and extra-keyword answers become the defaults for the next year in the same queue; resumed yearly runs restore those defaults from the saved split state.
+- Yearly reruns are now step-aware instead of all-or-nothing: Bulldozer announces which steps already happened for each year, defaults redo prompts to `no`, and only falls back into the natural flow for the missing steps.
+- qBittorrent presence checks now use the torrent infohash, so reruns can tell you when a tracker torrent is already in the client instead of blindly reinjecting it.
+- The Unwalled title helper now formats current incomplete same-year slices as `YYYY Month - Month YYYY`, for example `Wine About It [2026 January - March 2026/M4A - 192kbps]`.
 
 ## Upgrading
 

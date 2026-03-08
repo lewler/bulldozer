@@ -370,16 +370,20 @@ def ask_yes_no_default(question, default=False):
             return False
         announce("Please answer y or n.", "warning")
 
-def take_input(prompt):
+def take_input(prompt, default=None):
     """
     Take input from the user.
 
     :param prompt: The prompt to display.
+    :param default: Optional default value when the user presses enter.
     :return: The user's input.
     """
     while True:
-        response = input(f"❓{prompt}: ").strip()
+        prompt_suffix = f" [{default}]" if default not in (None, "") else ""
+        response = input(f"❓{prompt}{prompt_suffix}: ").strip()
         if response == '':
+            if default is not None:
+                return str(default)
             return None
         else:
             return response

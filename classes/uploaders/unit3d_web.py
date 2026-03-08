@@ -14,6 +14,7 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image, ImageFilter, ImageOps
 
+from ..split_run_state import remember_upload_prompt_defaults
 from ..upload_context import ReleaseProfile, UploadContextBuilder
 from ..utils import ask_yes_no, ask_yes_no_default, choose_option, take_input
 
@@ -252,28 +253,54 @@ class Unit3DWebUploader:
         raise ValueError(f"Failed to load a UNIT3D upload form. Tried: {error_message}")
 
     def _resolve_release_profile(self, category_options, type_options, category_metadata=None, dry_run=False):
-        default_category_id = self._infer_category_id(category_options) or next(iter(category_options.keys()), None)
-        default_type_id = self._infer_type_id(type_options) or next(iter(type_options.keys()), None)
+        prompt_defaults = self.config.get("_runtime", {}).get("upload_prompt_defaults", {})
+        default_category_id = (
+            prompt_defaults.get("category_id")
+            or self._infer_category_id(category_options)
+            or next(iter(category_options.keys()), None)
+        )
+        default_type_id = (
+            prompt_defaults.get("type_id")
+            or self._infer_type_id(type_options)
+            or next(iter(type_options.keys()), None)
+        )
+        if str(default_category_id) not in {str(option_id) for option_id in category_options}:
+            default_category_id = self._infer_category_id(category_options) or next(iter(category_options.keys()), None)
+        if str(default_type_id) not in {str(option_id) for option_id in type_options}:
+            default_type_id = self._infer_type_id(type_options) or next(iter(type_options.keys()), None)
         if default_category_id is None or default_type_id is None:
             raise ValueError("The tracker upload form is missing category or type options.")
 
         should_prompt = self.upload_config.get("ask", True) and not dry_run
         category_id = default_category_id
         type_id = default_type_id
-        anonymous = False
-        personal_release = False
-        ads_removed = False
-        extra_keywords = []
+        anonymous = bool(prompt_defaults.get("anonymous", False))
+        personal_release = bool(prompt_defaults.get("personal_release", False))
+        ads_removed = bool(prompt_defaults.get("ads_removed", False))
+        extra_keywords = list(prompt_defaults.get("extra_keywords", []))
 
         if should_prompt:
             category_id = choose_option("Select tracker category", category_options, default=default_category_id)
             type_id = choose_option("Select tracker type", type_options, default=default_type_id)
-            anonymous = ask_yes_no_default("Upload anonymously", default=False)
-            personal_release = ask_yes_no_default("Mark this as a personal release", default=False)
-            ads_removed = ask_yes_no_default("Were ads removed without transcoding", default=False)
+            anonymous = ask_yes_no_default("Upload anonymously", default=anonymous)
+            personal_release = ask_yes_no_default("Mark this as a personal release", default=personal_release)
+            ads_removed = ask_yes_no_default("Were ads removed without transcoding", default=ads_removed)
             extra_keywords = self._parse_extra_keywords(
-                take_input("Extra upload keywords (comma separated, blank for none)")
+                take_input(
+                    "Extra upload keywords (comma separated, blank for none)",
+                    default=", ".join(extra_keywords) if extra_keywords else None,
+                )
             )
+
+        remember_upload_prompt_defaults(
+            self.config,
+            category_id=category_id,
+            type_id=type_id,
+            anonymous=anonymous,
+            personal_release=personal_release,
+            ads_removed=ads_removed,
+            extra_keywords=extra_keywords,
+        )
 
         type_name = type_options[str(type_id)]
         return ReleaseProfile(

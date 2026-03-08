@@ -60,7 +60,7 @@ class UploadContextHelpersTest(unittest.TestCase):
                 completed=False,
                 current_year=2026,
             ),
-            "January 2026 - March 2026",
+            "2026 January - March 2026",
         )
 
     def test_build_title_period_label_uses_year_span_for_multi_year_pack(self):

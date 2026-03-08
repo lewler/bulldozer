@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -255,6 +256,101 @@ class Unit3DWebHelpersTest(unittest.TestCase):
                 uploader.cleanup()
 
             self.assertEqual(payload["mediainfo"], "")
+
+    def test_resolve_release_profile_uses_run_memory_as_prompt_defaults(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast = SimpleNamespace(
+                name="Wine About It",
+                folder_path=Path(temp_dir),
+                metadata=SimpleNamespace(get_tags=lambda: "", data={}, get_rss_feed=lambda: ""),
+            )
+            upload_context = SimpleNamespace(source_label=None, name="Wine About It", raw_name="Wine About It")
+            config = {
+                "upload": {
+                    "base_url": "https://unwalled.cc",
+                    "cookie_file": "cookies.txt",
+                    "ask": True,
+                },
+                "_runtime": {
+                    "upload_prompt_defaults": {
+                        "category_id": "12",
+                        "type_id": "22",
+                        "anonymous": True,
+                        "personal_release": True,
+                        "ads_removed": True,
+                        "extra_keywords": ["foo.bar", "baz"],
+                    }
+                },
+            }
+
+            uploader = Unit3DWebUploader(podcast, config, upload_context, Path(temp_dir) / "test.torrent")
+            try:
+                with patch("classes.uploaders.unit3d_web.choose_option", side_effect=lambda *args, **kwargs: kwargs["default"]) as choose_option, \
+                    patch("classes.uploaders.unit3d_web.ask_yes_no_default", side_effect=lambda *args, **kwargs: kwargs["default"]) as ask_yes_no_default, \
+                    patch("classes.uploaders.unit3d_web.take_input", return_value="foo.bar, baz"):
+                    profile = uploader._resolve_release_profile(
+                        {"11": "Comedy", "12": "Human Interest"},
+                        {"21": "Audio - Free", "22": "Audio - Patreon"},
+                        dry_run=False,
+                    )
+            finally:
+                uploader.cleanup()
+
+            self.assertEqual(profile.category_id, "12")
+            self.assertEqual(profile.type_id, "22")
+            self.assertTrue(profile.anonymous)
+            self.assertTrue(profile.personal_release)
+            self.assertTrue(profile.ads_removed)
+            self.assertEqual(profile.extra_keywords, ["foo.bar", "baz"])
+            self.assertEqual(choose_option.call_args_list[0].kwargs["default"], "12")
+            self.assertEqual(choose_option.call_args_list[1].kwargs["default"], "22")
+            self.assertEqual(ask_yes_no_default.call_args_list[0].kwargs["default"], True)
+            self.assertEqual(ask_yes_no_default.call_args_list[1].kwargs["default"], True)
+            self.assertEqual(ask_yes_no_default.call_args_list[2].kwargs["default"], True)
+
+    def test_resolve_release_profile_persists_choices_for_later_years(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast = SimpleNamespace(
+                name="Wine About It",
+                folder_path=Path(temp_dir),
+                metadata=SimpleNamespace(get_tags=lambda: "", data={}, get_rss_feed=lambda: ""),
+            )
+            upload_context = SimpleNamespace(source_label=None, name="Wine About It", raw_name="Wine About It")
+            config = {
+                "upload": {
+                    "base_url": "https://unwalled.cc",
+                    "cookie_file": "cookies.txt",
+                    "ask": True,
+                },
+                "_runtime": {},
+            }
+
+            uploader = Unit3DWebUploader(podcast, config, upload_context, Path(temp_dir) / "test.torrent")
+            try:
+                with patch("classes.uploaders.unit3d_web.choose_option", side_effect=["31", "7"]), \
+                    patch("classes.uploaders.unit3d_web.ask_yes_no_default", side_effect=[False, False, True]), \
+                    patch("classes.uploaders.unit3d_web.take_input", return_value="wine about it, qtcinderella"):
+                    profile = uploader._resolve_release_profile(
+                        {"6": "Comedy", "31": "Human Interest"},
+                        {"7": "Audio - Patreon", "9": "Audio - Free"},
+                        dry_run=False,
+                    )
+            finally:
+                uploader.cleanup()
+
+            self.assertEqual(profile.category_id, "31")
+            self.assertEqual(profile.type_id, "7")
+            self.assertEqual(
+                config["_runtime"]["upload_prompt_defaults"],
+                {
+                    "category_id": "31",
+                    "type_id": "7",
+                    "anonymous": False,
+                    "personal_release": False,
+                    "ads_removed": True,
+                    "extra_keywords": ["wine about it", "qtcinderella"],
+                },
+            )
 
 
 if __name__ == "__main__":

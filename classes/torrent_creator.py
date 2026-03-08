@@ -47,7 +47,7 @@ class TorrentCreator:
 
         return n
 
-    def create_torrent(self, piece_size):
+    def create_torrent(self, piece_size, replace_existing=None):
         """
         Create the torrent file for the podcast.
 
@@ -55,7 +55,9 @@ class TorrentCreator:
         """
         torrent_file_path = self.get_torrent_path()
         if torrent_file_path.exists():
-            if not ask_yes_no(f"Torrent file {torrent_file_path} already exists. Replace?"):
+            if replace_existing is None:
+                replace_existing = ask_yes_no(f"Torrent file {torrent_file_path} already exists. Replace?")
+            if not replace_existing:
                 return torrent_file_path
             log(f"Replacing torrent file: {torrent_file_path}", level="debug")
             torrent_file_path.unlink()
