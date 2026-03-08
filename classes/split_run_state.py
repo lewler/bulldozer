@@ -56,6 +56,20 @@ def get_remaining_split_paths(state_path, state=None):
     return remaining_paths
 
 
+def get_split_folder_paths(state_path, state=None):
+    state = state or load_split_state(state_path) or {}
+    root = Path(state_path).parent
+    existing_paths = []
+    missing_paths = []
+    for folder_name in state.get("split_folders", []):
+        folder_path = root / folder_name
+        if folder_path.exists():
+            existing_paths.append(folder_path)
+        else:
+            missing_paths.append(folder_path)
+    return existing_paths, missing_paths
+
+
 def bind_runtime_split_state(config, state_path, state=None):
     runtime = config.setdefault("_runtime", {})
     state = state or load_split_state(state_path) or {}
@@ -88,6 +102,7 @@ def backfill_completed_folders(config, state_path, state=None):
         if not tracker_torrent_path:
             continue
         completed_folders[folder_name] = {
+            "processed_at": None,
             "completed_at": None,
             "details_url": None,
             "download_url": None,
@@ -134,6 +149,23 @@ def remember_upload_prompt_defaults(
     return defaults
 
 
+def mark_split_folder_processed(config, folder_path):
+    runtime = config.get("_runtime", {})
+    split_state_runtime = runtime.get("split_state") or {}
+    state_path = split_state_runtime.get("path")
+    if not state_path:
+        return None
+
+    state = split_state_runtime.get("data") or load_split_state(state_path) or {}
+    completed_folders = state.setdefault("completed_folders", {})
+    folder_name = Path(folder_path).name
+    record = completed_folders.setdefault(folder_name, {})
+    record["processed_at"] = datetime.now(timezone.utc).isoformat()
+    save_split_state(state_path, state)
+    split_state_runtime["data"] = state
+    return record
+
+
 def mark_split_folder_completed(config, folder_path, result=None):
     runtime = config.get("_runtime", {})
     split_state_runtime = runtime.get("split_state") or {}
@@ -144,7 +176,9 @@ def mark_split_folder_completed(config, folder_path, result=None):
     state = split_state_runtime.get("data") or load_split_state(state_path) or {}
     completed_folders = state.setdefault("completed_folders", {})
     folder_name = Path(folder_path).name
+    prior_record = completed_folders.get(folder_name, {})
     completed_folders[folder_name] = {
+        "processed_at": prior_record.get("processed_at"),
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "details_url": getattr(result, "details_url", None),
         "download_url": getattr(result, "download_url", None),

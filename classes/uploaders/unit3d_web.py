@@ -690,7 +690,10 @@ class Unit3DWebUploader:
             raise ValueError(f"Upload succeeded but downloading the tracker torrent failed: HTTP {response.status_code}")
 
         tracker_torrent_path = self._build_tracker_torrent_path()
-        if tracker_torrent_path.exists() and not ask_yes_no(f"Tracker torrent {tracker_torrent_path} already exists. Replace it?"):
+        if tracker_torrent_path.exists() and not ask_yes_no(
+            f"Tracker torrent {tracker_torrent_path} already exists. Replace it?",
+            default_yes=True,
+        ):
             return tracker_torrent_path
 
         tracker_torrent_path.write_bytes(response.content)

@@ -163,7 +163,7 @@ podnews:
 
 ## podcast-dl Settings
 podcast_dl:
-  episode_template: '{{podcast_title}} - {{release_year}}-{{release_month}}-{{release_day}} {{title}}' # The template for the episode name
+  episode_template: '{{release_year}}-{{release_month}}-{{release_day}} {{title}}' # The template for the episode name
   threads: 4 # Number of threads to use for downloading
 
 ## Various settings
@@ -305,10 +305,10 @@ date_format_long: '%B %d %Y'
 ep_nr_at_end_file_pattern: '^(.* - )(\d{4}-\d{2}-\d{2}) (.*?)( - )((Ep\.?|Episode|E)?\s*(\d+))(\.\w+)$'
 
 # The pattern to match the episode file with a number
-numbered_episode_pattern: '^(.* - )(\d{4}-\d{2}-\d{2}) (\d+)\. (.*)(\.\w+)'
+numbered_episode_pattern: '^(\d{4}-\d{2}-\d{2})\s+(Ep\.?|Episode|E|Part)\s*(\d+)\s*-\s*(.*)(\.\w+)$'
 
 # The pattern to match the episode file without a number
-unnumbered_episode_pattern: '^(.*) - )(\d{4}-\d{2}-\d{2}) (.*)(\.\w+)'
+unnumbered_episode_pattern: '^(\d{4}-\d{2}-\d{2})\s+(.*)(\.\w+)$'
 
 # When renaming files, anything matching these patterns will be uppercase
 force_uppercase:
@@ -352,7 +352,7 @@ episode_pattern: '(Ep\.?|Episode|E|Part)(\s*)(\d+)'
 date_pattern: '\b(\d{4}-\d{2}-\d{2})\b'
 
 # How to prefix the episode number if dates are conflicting
-conflicing_dates_replacement: '{prefix} - {date} Ep. {episode} - {suffix}'
+conflicing_dates_replacement: '{date} Ep. {episode} - {title}'
 
 # Gets a clean name from the folder name
 clean_name: '^(.*?)(?=\()'

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image
 
@@ -256,6 +256,50 @@ class Unit3DWebHelpersTest(unittest.TestCase):
                 uploader.cleanup()
 
             self.assertEqual(payload["mediainfo"], "")
+
+    def test_download_uploaded_torrent_replace_prompt_defaults_to_yes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast = SimpleNamespace(
+                name="Wine About It",
+                folder_path=Path(temp_dir),
+                image=SimpleNamespace(
+                    get_meta_file_path=lambda: Path(temp_dir) / "Metadata" / "Wine About It.jpg",
+                    get_file_path=lambda: Path(temp_dir) / "Wine About It.image.jpg",
+                ),
+            )
+            upload_context = SimpleNamespace(
+                name="Wine About It [2024/M4A - 192kbps]",
+                raw_name="Wine About It [2024/M4A - 192kbps]",
+                description="description text",
+                keywords_string="society, culture, Patreon",
+                data={"mediainfo": {"output": ""}, "number_of_files": 12},
+            )
+            config = {
+                "upload": {
+                    "base_url": "https://unwalled.cc",
+                    "cookie_file": "cookies.txt",
+                    "ask": False,
+                }
+            }
+
+            torrent_path = Path(temp_dir) / "test.torrent"
+            torrent_path.write_bytes(b"torrent")
+            uploader = Unit3DWebUploader(podcast, config, upload_context, torrent_path)
+            tracker_torrent_path = uploader._build_tracker_torrent_path()
+            tracker_torrent_path.write_bytes(b"old")
+            response = Mock(ok=True, content=b"new")
+            uploader.session.get = Mock(return_value=response)
+            try:
+                with patch("classes.uploaders.unit3d_web.ask_yes_no", return_value=False) as ask_yes_no:
+                    returned_path = uploader._download_uploaded_torrent("https://unwalled.cc/torrents/download/1")
+            finally:
+                uploader.cleanup()
+
+            self.assertEqual(returned_path, tracker_torrent_path)
+            ask_yes_no.assert_called_once_with(
+                f"Tracker torrent {tracker_torrent_path} already exists. Replace it?",
+                default_yes=True,
+            )
 
     def test_resolve_release_profile_uses_run_memory_as_prompt_defaults(self):
         with tempfile.TemporaryDirectory() as temp_dir:

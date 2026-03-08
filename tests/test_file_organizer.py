@@ -33,6 +33,63 @@ class FileOrganizerStagingTest(unittest.TestCase):
             mp4.assert_not_called()
 
 
+class FileOrganizerSortableFilenameTest(unittest.TestCase):
+    def make_podcast(self, temp_dir, rss_titles=None):
+        podcast_folder = Path(temp_dir) / "The WAN Show"
+        podcast_folder.mkdir()
+        analyzer = SimpleNamespace(
+            update_file_path=Mock(),
+            file_dates={},
+            original_files={},
+        )
+        return SimpleNamespace(
+            folder_path=podcast_folder,
+            name="The WAN Show",
+            analyzer=analyzer,
+            rss=SimpleNamespace(get_episodes=Mock(return_value=rss_titles or [])),
+        )
+
+    def test_apply_sortable_audio_filename_uses_plain_date_prefix_without_brackets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast = self.make_podcast(temp_dir)
+            organizer = FileOrganizer(podcast, {})
+            file_path = podcast.folder_path / "JIBO IS DEAD!! - The WAN Show Nov 30 2018.mp3"
+            file_path.write_text("episode")
+
+            new_path = organizer.apply_sortable_audio_filename(file_path, "2018-11-30")
+
+            self.assertEqual(new_path.name, "2018-11-30 JIBO IS DEAD!!.mp3")
+            self.assertTrue(new_path.exists())
+            self.assertFalse(file_path.exists())
+
+    def test_apply_sortable_audio_filename_strips_episode_number_when_date_is_unique(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast = self.make_podcast(temp_dir)
+            organizer = FileOrganizer(podcast, {})
+            podcast.analyzer.file_dates = {"2019-06-08": [podcast.folder_path / "old.mp3"]}
+            file_path = podcast.folder_path / "2019-06-08 Ep. 07 - Let's Talk About The Mac Stand... - WAN Show.mp3"
+            file_path.write_text("episode")
+
+            new_path = organizer.apply_sortable_audio_filename(file_path, "2019-06-08")
+
+            self.assertEqual(new_path.name, "2019-06-08 Let's Talk About The Mac Stand... - WAN Show.mp3")
+            self.assertTrue(new_path.exists())
+            self.assertFalse(file_path.exists())
+
+    def test_assign_episode_numbers_from_rss_uses_plain_date_prefix_without_brackets(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            podcast = self.make_podcast(temp_dir, rss_titles=["Bent iPad Pros"])
+            organizer = FileOrganizer(podcast, {"trailer_patterns": ["trailer"]})
+            file_path = podcast.folder_path / "Bent iPad Pros - The WAN Show Dec 21 2018.mp3"
+            file_path.write_text("episode")
+
+            organizer.assign_episode_numbers_from_rss({"2018-12-21": [file_path]})
+
+            new_path = podcast.folder_path / "2018-12-21 Ep. 1 - Bent iPad Pros.mp3"
+            self.assertTrue(new_path.exists())
+            podcast.analyzer.update_file_path.assert_called_once_with(file_path, new_path)
+
+
 class FileOrganizerSplitTest(unittest.TestCase):
     def make_podcast(self, temp_dir):
         podcast_folder = Path(temp_dir) / "Sample Podcast"

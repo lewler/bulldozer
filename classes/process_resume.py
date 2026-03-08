@@ -13,6 +13,7 @@ from .torrent_creator import TorrentCreator
 @dataclass
 class ProcessResumeStatus:
     label_text: str
+    processed: bool
     report_path: Path
     report_exists: bool
     local_torrent_path: Path | None
@@ -28,12 +29,24 @@ class ProcessResumeStatus:
     def any_prior_step(self):
         return any(
             [
+                self.processed,
                 self.report_exists,
                 self.local_torrent_exists,
                 self.upload_exists,
                 self.client_present,
             ]
         )
+
+
+def build_redo_plan(step_status, mode, *, upload_requested=False, client_active=False):
+    redo_all = mode == "redo_all"
+    return {
+        "redo_processing": bool(redo_all and step_status.processed),
+        "redo_report": bool(redo_all and step_status.report_exists),
+        "redo_torrent": bool(redo_all and step_status.local_torrent_exists),
+        "redo_upload": bool(redo_all and upload_requested and step_status.upload_exists),
+        "redo_client": bool(redo_all and client_active and step_status.client_present),
+    }
 
 
 def inspect_process_resume_status(podcast, config, announce_url=None, base_dir=None, tracker_source=None):
@@ -70,6 +83,7 @@ def inspect_process_resume_status(podcast, config, announce_url=None, base_dir=N
 
     upload_exists = bool(folder_record) or bool(tracker_torrent_path)
     upload_details_url = folder_record.get("details_url")
+    processed = bool(folder_record.get("processed_at"))
 
     client_present = bool(folder_record.get("client_present", False))
     client_save_path = folder_record.get("client_save_path")
@@ -83,9 +97,12 @@ def inspect_process_resume_status(podcast, config, announce_url=None, base_dir=N
         client_present = client_status.present
         client_save_path = client_status.save_path
         client_infohash = client_status.infohash
+    if not processed:
+        processed = any([report_exists, local_torrent_exists, upload_exists, client_present])
 
     return ProcessResumeStatus(
         label_text=label_text,
+        processed=processed,
         report_path=report_path,
         report_exists=report_exists,
         local_torrent_path=local_torrent_path,

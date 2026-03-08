@@ -77,7 +77,7 @@ class Podcast:
         self.check_for_duplicates()
         log(f"Duplicate check completed, proceeding with download", "info")
 
-        episode_template = self.config.get("podcast_dl", {}).get('episode_template', "{{podcast_title}} - {{release_year}}-{{release_month}}-{{release_day}} {{title}}")
+        episode_template = self.config.get("podcast_dl", {}).get('episode_template', "{{release_year}}-{{release_month}}-{{release_day}} {{title}}")
         threads = threads_override if threads_override is not None else self.config.get("podcast_dl", {}).get("threads", 1)
         log(f"Using episode template: {episode_template}", "info")
         log(f"Using {threads} thread(s) for download", "info")

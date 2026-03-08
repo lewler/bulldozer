@@ -6,11 +6,13 @@ from types import SimpleNamespace
 from classes.split_run_state import (
     backfill_completed_folders,
     bind_runtime_split_state,
+    get_split_folder_paths,
     get_remaining_split_paths,
     get_split_state_path,
     initialize_split_state,
     load_split_state,
     mark_split_folder_completed,
+    mark_split_folder_processed,
     remember_upload_prompt_defaults,
 )
 
@@ -123,6 +125,59 @@ class SplitRunStateTest(unittest.TestCase):
 
             self.assertEqual(set(state["completed_folders"].keys()), {"Sample Podcast (2024)", "Sample Podcast (2025)"})
             self.assertEqual(get_remaining_split_paths(state_path, state), [split_c])
+
+    def test_mark_processed_persists_and_survives_completion(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            staging_root = Path(temp_dir)
+            split_a = staging_root / "Sample Podcast (2024)"
+            split_a.mkdir()
+            state_path = get_split_state_path(staging_root, "Sample Podcast")
+            state = initialize_split_state(
+                state_path,
+                "/library/Sample Podcast",
+                "yearly",
+                [split_a],
+            )
+            config = {"_runtime": {}}
+            bind_runtime_split_state(config, state_path, state)
+
+            processed_record = mark_split_folder_processed(config, split_a)
+            self.assertIn("processed_at", processed_record)
+
+            mark_split_folder_completed(
+                config,
+                split_a,
+                result=SimpleNamespace(details_url="https://tracker/torrents/1", download_url=None, tracker_torrent_path=None),
+            )
+
+            reloaded = load_split_state(state_path)
+            self.assertIn("processed_at", reloaded["completed_folders"]["Sample Podcast (2024)"])
+            self.assertEqual(
+                reloaded["completed_folders"]["Sample Podcast (2024)"]["details_url"],
+                "https://tracker/torrents/1",
+            )
+
+    def test_get_split_folder_paths_separates_existing_and_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            staging_root = Path(temp_dir)
+            split_a = staging_root / "Sample Podcast (2024)"
+            split_b = staging_root / "Sample Podcast (2025)"
+            split_c = staging_root / "Sample Podcast (2026)"
+            split_a.mkdir()
+            split_c.mkdir()
+
+            state_path = get_split_state_path(staging_root, "Sample Podcast")
+            state = initialize_split_state(
+                state_path,
+                "/library/Sample Podcast",
+                "yearly",
+                [split_a, split_b, split_c],
+            )
+
+            existing, missing = get_split_folder_paths(state_path, state)
+
+            self.assertEqual(existing, [split_a, split_c])
+            self.assertEqual(missing, [split_b])
 
 
 if __name__ == "__main__":

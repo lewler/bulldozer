@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from mutagen.easyid3 import EasyID3
 from mutagen.mp4 import MP4
+from .file_analyzer import extract_date_from_filename_text
 from .utils import spinner, titlecase_filename, announce, log, perform_replacements
 from .utils import format_last_date, ask_yes_no, take_input, normalize_string, reset_yes_to_all
 from .utils import choose_option, is_interactive_terminal
@@ -29,11 +30,25 @@ class FileOrganizer:
         Rename the episode files in the podcast folder.
         """
         ep_nr_at_end_file_pattern = re.compile(self.config.get('ep_nr_at_end_file_pattern', r'^(.* - )(\d{4}-\d{2}-\d{2}) (.*?)( - )((Ep\.?|Episode|E)?\s*(\d+))(\.\w+)$'))
+        file_date_lookup = self.build_file_date_lookup()
         for file_path in Path(self.podcast.folder_path).rglob('*'):
             if file_path.is_file():
-                new_file_path = self.rename_file(file_path, ep_nr_at_end_file_pattern)
+                file_date = file_date_lookup.get(file_path)
+                new_file_path = self.rename_file(file_path, ep_nr_at_end_file_pattern, file_date)
                 if new_file_path != file_path:
                     self.podcast.analyzer.update_file_path(file_path, new_file_path)
+
+    def build_file_date_lookup(self):
+        file_date_lookup = {}
+        analyzer = getattr(self.podcast, "analyzer", None)
+        for mapping_name in ("file_dates", "original_files"):
+            mapping = getattr(analyzer, mapping_name, None) or {}
+            for date_str, file_paths in mapping.items():
+                if not date_str or date_str == "Unknown":
+                    continue
+                for file_path in file_paths:
+                    file_date_lookup[Path(file_path)] = date_str
+        return file_date_lookup
 
     def get_new_name(self, name, file_path):
         """
@@ -71,7 +86,7 @@ class FileOrganizer:
 
         return file_path
 
-    def rename_file(self, file_path, ep_nr_at_end_file_pattern):
+    def rename_file(self, file_path, ep_nr_at_end_file_pattern, file_date=None):
         """
         Rename an individual episode file.
 
@@ -84,7 +99,86 @@ class FileOrganizer:
         file_path.rename(new_path)
         file_path = new_path
 
-        return self.fix_episode_numbering(file_path, ep_nr_at_end_file_pattern)
+        file_path = self.fix_episode_numbering(file_path, ep_nr_at_end_file_pattern)
+        return self.apply_sortable_audio_filename(file_path, file_date)
+
+    def apply_sortable_audio_filename(self, file_path, file_date=None):
+        if file_path.suffix.lower() not in ['.mp3', '.m4a']:
+            return file_path
+
+        file_date = file_date or extract_date_from_filename_text(file_path.name)
+        if not file_date or file_date == "Unknown":
+            return file_path
+
+        episode_number = self.extract_episode_number(file_path.stem)
+        has_date_conflict = self.has_conflicting_date(file_date)
+        clean_title = self.clean_sortable_title(file_path, file_date)
+        if not clean_title:
+            clean_title = file_path.stem
+
+        if episode_number and has_date_conflict:
+            new_filename = f"{file_date} Ep. {episode_number} - {clean_title}{file_path.suffix}"
+        else:
+            new_filename = f"{file_date} {clean_title}{file_path.suffix}"
+
+        if new_filename == file_path.name:
+            return file_path
+
+        new_path = file_path.with_name(new_filename)
+        file_path.rename(new_path)
+        log(f"Renamed '{file_path}' to sortable '{new_path}'", "debug")
+        return new_path
+
+    def extract_episode_number(self, stem):
+        pattern = re.compile(self.config.get('episode_pattern', r'(Ep\.?|Episode|E|Part)(\s*)(\d+)'), re.IGNORECASE)
+        matches = list(pattern.finditer(stem))
+        if not matches:
+            return None
+        return matches[-1].group(3)
+
+    def has_conflicting_date(self, file_date):
+        analyzer = getattr(self.podcast, "analyzer", None)
+        if not analyzer or not file_date or file_date == "Unknown":
+            return False
+
+        for mapping_name in ("file_dates", "original_files"):
+            mapping = getattr(analyzer, mapping_name, None) or {}
+            if len(mapping.get(file_date, [])) > 1:
+                return True
+        return False
+
+    def clean_sortable_title(self, file_path, file_date):
+        title = file_path.stem
+        title = re.sub(r'^\[?\d{4}-\d{2}-\d{2}\]?\s*[-–—:|]?\s*', '', title).strip()
+        title = re.sub(rf'\b{re.escape(file_date)}\b', '', title, flags=re.IGNORECASE)
+
+        podcast_name = getattr(self.podcast, "name", "")
+        if podcast_name:
+            title = re.sub(re.escape(podcast_name), '', title, flags=re.IGNORECASE)
+
+        title = re.sub(
+            r'\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|'
+            r'Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?\s+\d{4}\b',
+            '',
+            title,
+            flags=re.IGNORECASE,
+        )
+        title = re.sub(
+            r'\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|'
+            r'Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b',
+            '',
+            title,
+            flags=re.IGNORECASE,
+        )
+        title = re.sub(self.config.get('episode_pattern', r'(Ep\.?|Episode|E|Part)(\s*)(\d+)'), '', title, flags=re.IGNORECASE)
+        title = re.sub(r'[_]+', ' ', title)
+        title = re.sub(r'\s*-\s*', ' - ', title)
+        title = re.sub(r'\(\s*\)', '', title)
+        title = re.sub(r'\[\s*\]', '', title)
+        title = re.sub(r'^\s*[-–—:|,.()]+\s*', '', title)
+        title = re.sub(r'\s*[-–—:|,.()]+\s*$', '', title)
+        title = re.sub(r'\s{2,}', ' ', title).strip()
+        return title
 
     def update_file_metadata(self):
         """
@@ -251,7 +345,7 @@ class FileOrganizer:
         """
         episode_titles = self.podcast.rss.get_episodes()
         episode_titles.reverse()
-        filename_format = self.config.get('conflicing_dates_replacement', '{prefix} - {date} Ep. {episode} - {suffix}')
+        filename_format = self.config.get('conflicing_dates_replacement', '{date} Ep. {episode} - {title}')
         has_trailer = False
         trailer_patterns = self.config.get('trailer_patterns', [])
         trailer_regex = re.compile('|'.join([re.escape(pattern) for pattern in trailer_patterns]), re.IGNORECASE)
@@ -272,10 +366,8 @@ class FileOrganizer:
                     if normalized_title in normalized_filename:
                         padded_episode = str(episode_number).zfill(num_digits)
 
-                        original_title = re.sub(rf'\b{date}\b ', '', file_path.name).strip()
-                        title_parts = re.split(self.config.get('title_split_pattern', r' - (?=[^-]*$)'), original_title)
-                        
-                        new_filename = filename_format.format(prefix=title_parts[0].strip(), date=date, episode=padded_episode, suffix=title_parts[1].strip())
+                        clean_title = self.clean_sortable_title(file_path, date)
+                        new_filename = filename_format.format(date=date, episode=padded_episode, title=clean_title) + file_path.suffix
                         new_path = file_path.with_name(new_filename)
 
                         file_path.rename(new_path)
@@ -292,9 +384,15 @@ class FileOrganizer:
         conflicting_episodes = self.find_files_without_episode_numbers()
         if conflicting_episodes:
             self.assign_episode_numbers_from_rss(conflicting_episodes)
-        pattern = re.compile(self.config.get('numbered_episode_pattern', r'^(.* - )(\d{4}-\d{2}-\d{2}) (\d+)\. (.*)(\.\w+)'))
+        pattern = re.compile(
+            self.config.get(
+                'numbered_episode_pattern',
+                r'^(\d{4}-\d{2}-\d{2})\s+(Ep\.?|Episode|E|Part)\s*(\d+)\s*-\s*(.*)(\.\w+)$',
+            ),
+            re.IGNORECASE,
+        )
     
-        files = Path(self.podcast.folder_path).rglob('*')
+        files = list(Path(self.podcast.folder_path).rglob('*'))
         has_episode_number = any(pattern.match(f.name) for f in files)
         if has_episode_number:
             missing_episode_number = [f for f in files if not pattern.match(f.name)]
@@ -304,23 +402,15 @@ class FileOrganizer:
                         continue
                     episode_number = take_input(f"Episode number for '{f}' (blank skips)")
                     if episode_number:
-                        original_pattern = re.compile(self.config.get('numbered_episode_pattern', r'^(.*) - (\d{4}-\d{2}-\d{2}) (.*?)(\.\w+)'))
-                        match = original_pattern.match(f.name)
-                        
-                        if match:
-                            prefix = match.group(1)
-                            date_part = match.group(2)
-                            title = match.group(3).strip()
-                            extension = match.group(4)
-
-                            new_filename = f"{prefix} - {date_part} {episode_number}. {title}{extension}"
-
-                            folder_path = Path(folder_path)
-
-                            old_filepath = folder_path / f
-                            new_filepath = folder_path / new_filename
-
-                            old_filepath.rename(new_filepath)
+                        date_part = self.build_file_date_lookup().get(f) or extract_date_from_filename_text(f.name)
+                        if not date_part:
+                            log(f"Could not determine date for '{f.name}', skipping manual numbering rename", "warning")
+                            continue
+                        title = self.clean_sortable_title(f, date_part)
+                        new_filename = f"{date_part} Ep. {episode_number} - {title}{f.suffix}"
+                        new_filepath = f.with_name(new_filename)
+                        f.rename(new_filepath)
+                        self.podcast.analyzer.update_file_path(f, new_filepath)
 
     def check_split(self):
         """

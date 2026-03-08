@@ -10,16 +10,19 @@ from classes.dupe_checker import DupeChecker
 from classes.file_organizer import FileOrganizer
 from classes.podcast import Podcast
 from classes.process_resume import inspect_process_resume_status
+from classes.process_resume import build_redo_plan
 from classes.split_run_state import (
     backfill_completed_folders,
     bind_runtime_split_state,
+    get_split_folder_paths,
     initialize_split_state,
     load_split_state,
     mark_split_folder_client_injected,
+    mark_split_folder_processed,
 )
 from classes.staging_manager import StagingManager
 from classes.torrent_creator import TorrentCreator
-from classes.utils import load_config, setup_logging, announce, ask_yes_no, check_config, log, fix_folder_name, is_interactive_terminal
+from classes.utils import load_config, setup_logging, announce, ask_yes_no, check_config, log, fix_folder_name, is_interactive_terminal, choose_option
 from classes.utils import rename_folder, check_and_install_podcast_dl, check_and_install_mktorrent
 from classes.report import Report
 from classes.upload_manager import UploadManager
@@ -221,7 +224,18 @@ def load_resume_split_queue(staging_manager, source_folder_path, display_name, s
             f"Resuming yearly split run. {completed_count} folder(s) already have completed steps recorded and will default to skip unless you choose to redo them.",
             "info",
         )
-    split_folder_paths = [Path(state_path).parent / folder_name for folder_name in state.get("split_folders", []) if (Path(state_path).parent / folder_name).exists()]
+    split_folder_paths, missing_split_paths = get_split_folder_paths(state_path, state)
+    if missing_split_paths:
+        announce(
+            f"Saved yearly split state is missing {len(missing_split_paths)} folder(s) in the staging root.",
+            "warning",
+        )
+        if is_interactive_terminal() and ask_yes_no(
+            f"Would you like to rebuild the missing yearly folders for '{display_name}' from the source folder now?",
+            default_yes=True,
+        ):
+            return None
+        announce("Continuing with the yearly folders that still exist on disk.", "warning")
     if not split_folder_paths:
         announce("No existing yearly split folders were found for the saved split state.", "warning")
         return []
@@ -232,7 +246,8 @@ def announce_existing_step_status(step_status, upload_requested=False, client_ac
     if not step_status.any_prior_step:
         return
 
-    announce(f"{step_status.label_text.capitalize()} has already been processed.", "info")
+    if step_status.processed:
+        announce(f"{step_status.label_text.capitalize()} has already been processed.", "info")
     if step_status.report_exists:
         announce(f"Report for {step_status.label_text} already exists: {step_status.report_path}", "info")
     if step_status.local_torrent_exists:
@@ -274,28 +289,66 @@ def process_podcast(podcast, search_term=None, report_only=False, refresh=False,
     announce_existing_step_status(step_status, upload_requested=upload_requested, client_active=client_active)
 
     revisit_completed_steps = False
+    redo_mode = "skip"
+    redo_processing = False
     redo_report = False
     redo_torrent = False
     redo_upload = False
     redo_client = False
     if step_status.any_prior_step and is_interactive_terminal():
-        revisit_completed_steps = ask_yes_no(
-            f"Would you like to redo any completed steps for {step_status.label_text}",
-            default_yes=False,
+        redo_mode = choose_option(
+            f"How would you like to handle completed steps for {step_status.label_text}?",
+            {
+                "skip": "Keep completed steps and continue from anything missing",
+                "redo_all": "Redo processing and all completed downstream steps",
+                "select": "Choose individual completed steps to redo",
+            },
+            default="skip",
         )
-    if revisit_completed_steps:
+        revisit_completed_steps = redo_mode != "skip"
+    if redo_mode == "redo_all":
+        redo_plan = build_redo_plan(
+            step_status,
+            redo_mode,
+            upload_requested=upload_requested,
+            client_active=client_active,
+        )
+        redo_processing = redo_plan["redo_processing"]
+        redo_report = redo_plan["redo_report"]
+        redo_torrent = redo_plan["redo_torrent"]
+        redo_upload = redo_plan["redo_upload"]
+        redo_client = redo_plan["redo_client"]
+    elif revisit_completed_steps:
+        if step_status.processed:
+            redo_processing = ask_yes_no(
+                f"Reprocess and rename files for {step_status.label_text}",
+                default_yes=False,
+            )
         if step_status.report_exists:
-            redo_report = ask_yes_no(f"Regenerate the report for {step_status.label_text}", default_yes=False)
+            redo_report = ask_yes_no(
+                f"Regenerate the report for {step_status.label_text}",
+                default_yes=redo_processing,
+            )
         if step_status.local_torrent_exists:
-            redo_torrent = ask_yes_no(f"Recreate the local torrent for {step_status.label_text}", default_yes=False)
+            redo_torrent = ask_yes_no(
+                f"Recreate the local torrent for {step_status.label_text}",
+                default_yes=redo_processing,
+            )
         if upload_requested and step_status.upload_exists:
-            redo_upload = ask_yes_no(f"Upload {step_status.label_text} to the tracker again", default_yes=False)
+            redo_upload = ask_yes_no(
+                f"Upload {step_status.label_text} to the tracker again",
+                default_yes=redo_processing,
+            )
         if client_active and step_status.client_present:
-            redo_client = ask_yes_no(f"Reinject {step_status.label_text} into the torrent client", default_yes=False)
+            redo_client = ask_yes_no(
+                f"Reinject {step_status.label_text} into the torrent client",
+                default_yes=redo_processing,
+            )
 
-    fresh_processing = not step_status.any_prior_step
-    if not report_only and fresh_processing:
+    should_process = not report_only and (redo_processing or not step_status.processed)
+    if should_process:
         podcast.organize_files(skip_split=skip_split)
+        mark_split_folder_processed(config, podcast.folder_path)
 
     report = Report(podcast, config)
     generate_report = redo_report or not step_status.report_exists
@@ -345,7 +398,7 @@ def process_podcast(podcast, search_term=None, report_only=False, refresh=False,
         podcast.db.close()
         return
 
-    if fresh_processing or generate_report:
+    if should_process or generate_report:
         podcast.archive_files()
 
     if step_status.local_torrent_exists and not redo_torrent:

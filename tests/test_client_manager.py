@@ -123,6 +123,41 @@ class QBittorrentClientTest(unittest.TestCase):
         add_call = session.post.call_args_list[1]
         self.assertEqual(add_call.kwargs["data"]["savepath"], str(configured_save_path))
 
+    def test_add_torrent_treats_duplicate_as_already_present_success(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            parent_path = Path(temp_dir) / "grind"
+            parent_path.mkdir()
+            podcast_folder = parent_path / "The WAN Show (2018)"
+            podcast_folder.mkdir()
+            torrent_path = Path(temp_dir) / "The WAN Show (2018).tracker.torrent"
+            torrent_path.write_bytes(self.make_torrent_bytes())
+
+            podcast = SimpleNamespace(folder_path=podcast_folder)
+            session = Mock()
+            session.post.side_effect = [
+                SimpleNamespace(status_code=200, text="Ok."),
+                SimpleNamespace(status_code=200, text="Fails."),
+            ]
+            inspect_response = Mock(status_code=200, text="[]")
+            inspect_response.json.return_value = [{"save_path": str(parent_path)}]
+            session.get.return_value = inspect_response
+
+            with patch("classes.client_manager.requests.Session", return_value=session):
+                client = QBittorrentClient(
+                    podcast,
+                    {
+                        "url": "http://127.0.0.1:18080",
+                        "username": "admin",
+                        "password": "secret",
+                    },
+                )
+                result = client.add_torrent(torrent_path)
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.save_path, str(parent_path))
+        self.assertIn("already present in qBittorrent", result.status_message)
+        self.assertEqual(session.get.call_count, 1)
+
     def test_compute_v1_torrent_infohash(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             torrent_path = Path(temp_dir) / "test.torrent"

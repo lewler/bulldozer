@@ -117,6 +117,25 @@ class QBittorrentClient:
 
         response_text = (response.text or "").strip()
         if response_text and response_text != "Ok.":
+            existing = self._inspect_existing_infohash(infohash)
+            if existing:
+                existing_save_path = existing.get("save_path")
+                if existing_save_path:
+                    status_message = (
+                        f"Tracker torrent is already present in qBittorrent with save path {existing_save_path}; "
+                        "leaving the existing entry in place"
+                    )
+                else:
+                    status_message = (
+                        f"Tracker torrent is already present in qBittorrent with infohash {infohash}; "
+                        "leaving the existing entry in place"
+                    )
+                return ClientAddResult(
+                    success=True,
+                    status_message=status_message,
+                    save_path=existing_save_path or save_path,
+                    infohash=infohash,
+                )
             raise ValueError(f"qBittorrent rejected the torrent add request: {response_text}")
 
         return ClientAddResult(
@@ -130,15 +149,7 @@ class QBittorrentClient:
         self._validate()
         self._login()
         infohash = compute_v1_torrent_infohash(Path(torrent_path))
-        response = self.session.get(
-            self._build_url("api/v2/torrents/info"),
-            params={"hashes": infohash},
-            timeout=self.timeout,
-        )
-        if response.status_code >= 400:
-            raise ValueError(f"qBittorrent torrent inspection failed: HTTP {response.status_code}")
-
-        items = response.json() if response.text else []
+        items = self._get_torrent_info(infohash)
         if items:
             save_path = items[0].get("save_path")
             return ClientInspectResult(
@@ -152,6 +163,22 @@ class QBittorrentClient:
             infohash=infohash,
             status_message=f"Torrent is not present in qBittorrent for infohash {infohash}",
         )
+
+    def _inspect_existing_infohash(self, infohash):
+        items = self._get_torrent_info(infohash)
+        if items:
+            return items[0]
+        return None
+
+    def _get_torrent_info(self, infohash):
+        response = self.session.get(
+            self._build_url("api/v2/torrents/info"),
+            params={"hashes": infohash},
+            timeout=self.timeout,
+        )
+        if response.status_code >= 400:
+            raise ValueError(f"qBittorrent torrent inspection failed: HTTP {response.status_code}")
+        return response.json() if response.text else []
 
     def _login(self):
         response = self.session.post(

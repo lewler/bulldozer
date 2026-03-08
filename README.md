@@ -123,8 +123,13 @@ Notes:
 - If that split-state file does not exist yet but earlier yearly uploads already produced tracker-returned `.tracker.torrent` files, Bulldozer now backfills completion state from those artifacts on the first rerun and resumes instead of restarting from year one.
 - During a yearly upload run, the last selected tracker category, type, anonymity, personal-release, ads-removed, and extra-keyword answers become the defaults for the next year in the same queue; resumed yearly runs restore those defaults from the saved split state.
 - Yearly reruns are now step-aware instead of all-or-nothing: Bulldozer announces which steps already happened for each year, defaults redo prompts to `no`, and only falls back into the natural flow for the missing steps.
+- The processing/rename pass is now part of that rerun state too, so yearly reruns can explicitly redo file organization before regenerating the report, torrent, upload, or client injection.
+- The normal rerun UX now collapses that into a single per-year choice: `skip`, `redo_all`, or `select`, so you are not forced through five separate yes/no questions just to rerun one year.
+- If a saved yearly split state exists but some year folders are missing from the staging root, Bulldozer now detects that mismatch up front and offers to rebuild the missing yearly folders from the source folder instead of silently queuing only the one remaining year.
 - qBittorrent presence checks now use the torrent infohash, so reruns can tell you when a tracker torrent is already in the client instead of blindly reinjecting it.
 - The Unwalled title helper now formats current incomplete same-year slices as `YYYY Month - Month YYYY`, for example `Wine About It [2026 January - March 2026/M4A - 192kbps]`.
+- Audio filename normalization now prefers sortable date-first names with no brackets, for example `2018-11-30 JIBO IS DEAD!!.mp3` or `2018-12-21 Ep. 01 - Bent iPad Pros.mp3`, which aligns better with Unwalled's broadcast-order sorting expectations.
+- Legacy `Ep.` numbers on unique-date files are stripped during normalization, so reruns converge back to plain `YYYY-MM-DD Title.ext` unless multiple episodes actually share the same broadcast date.
 
 ## Upgrading
 
