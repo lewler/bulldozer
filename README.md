@@ -12,9 +12,12 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 - Data fetching from Podnews
 - Automatic RSS censoring for matching premium sources
 - Optional local database with metadata for improved flexibility
-- Option to split active podcasts on current year (database required)
+- Option to split active podcasts on current year or yearly, with an interactive suggestion when relevant
 - Partial download of feed using --match-titles
 - Torrent file creation with piece size calculation
+- Optional UNIT3D web upload with Netscape cookie auth, image preprocessing, and tracker-torrent download
+- Optional qBittorrent injection after upload
+- Optional staging for local-folder runs using hardlinks or copies
 
 ## Requirements
 
@@ -61,6 +64,73 @@ Bulldozer is a script designed to automate the process of downloading, organizin
 Edit the `config.yaml` file to set up your preferences and API keys. The configuration file includes pretty much all settings that are needed to customize the behavior of the script. The settings most users need to change are at the top of the configuration file. The file has comments, and it's hopefully easy enough to understand what everything does.
 
 Note that you do not need to copy the entire file, and you do not need to add values that you don't need to change. This approach means less work when new things are added to `config.default.yaml`.
+
+### UNIT3D Upload Configuration
+
+Bulldozer can now submit completed podcast uploads directly to a UNIT3D tracker such as Unwalled by using the normal web upload form. The upload stage is optional and disabled by default.
+
+Example override:
+
+```yaml
+upload:
+  active: true
+  backend: unit3d_web
+  base_url: https://unwalled.cc
+  cookie_file: data/cookies/UNW.txt
+  download_uploaded_torrent: true
+
+client:
+  active: true
+  backend: qbittorrent
+  url: http://127.0.0.1:8080
+  save_path: /mnt/Pool/Media/Torrents/grind
+  category: grind
+  tags:
+    - grind
+```
+
+Notes:
+- Export the tracker session cookies in Netscape `cookies.txt` format.
+- Tracker category, type, anonymity, personal release, ads-removed, and extra keywords are resolved at runtime during the upload flow.
+- For no-meta trackers like Unwalled, the uploader will require a square cover JPG and a 16:9 banner JPG unless `upload.require_images` is disabled.
+- After a successful upload, Bulldozer can download the tracker-returned `.torrent` file separately so you can seed with the tracker version.
+- qBittorrent injection uses `client.save_path` when set, otherwise the parent of the processed folder, so qBittorrent can recheck and seed the existing data.
+- qBittorrent credentials can be set in `client.username` / `client.password` or provided via `QBITTORRENT_USERNAME` / `QBITTORRENT_PASSWORD` or `QBT_USER` / `QBT_PASS`.
+- Interactive upload runs default the create-torrent and upload-confirmation prompts to yes so you can step through the flow with Enter.
+
+### Local Folder Staging
+
+When you point Bulldozer at an existing local podcast folder, Bulldozer normally organizes that folder in place. If upload or qBittorrent injection is enabled, staging is the safe way to preserve your library while still producing a tracker-shaped working tree that qBittorrent can seed.
+
+Example override:
+
+```yaml
+staging:
+  active: true
+  path: /mnt/Pool/Media/Torrents/.bulldozer-staging
+  mode: hardlink
+```
+
+Notes:
+- `staging.mode: hardlink` creates a seedable working tree without duplicating the underlying media data.
+- If `staging.path` is not set and `client.save_path` is set, Bulldozer stages directly into that save path so qBittorrent can seed the prepared tree without an extra hidden staging root.
+- If neither `staging.path` nor `client.save_path` is set and staging is forced by upload or client injection, Bulldozer stages into a sibling `.bulldozer-staging` folder next to the source input.
+- qBittorrent injection uses the staged folder, so the returned tracker torrent sees the same layout Bulldozer uploaded.
+- Hardlink staging skips in-place audio tag rewrites by default so the source library is not modified through shared inodes.
+- `staging.overwrite: true` replaces an existing staged folder with the same name before a new run.
+- When an active podcast spans multiple years and `split: false`, interactive upload/client runs suggest splitting automatically and default to `yearly` so a single root-folder run can queue one upload per year.
+- Yearly split runs now persist a small split-state file in the staging root so rerunning the same root-folder command can skip years that already uploaded successfully and continue from the next unfinished year.
+- If that split-state file does not exist yet but earlier yearly uploads already produced tracker-returned `.tracker.torrent` files, Bulldozer now backfills completion state from those artifacts on the first rerun and resumes instead of restarting from year one.
+- During a yearly upload run, the last selected tracker category, type, anonymity, personal-release, ads-removed, and extra-keyword answers become the defaults for the next year in the same queue; resumed yearly runs restore those defaults from the saved split state.
+- After the first successful year in an interactive yearly upload queue, Bulldozer now asks once whether to automatically apply that year's choices to the remaining years. If you say yes, the later years reuse those choices and continue through torrent creation, upload, and client injection without re-asking the same prompts.
+- Yearly reruns are now step-aware instead of all-or-nothing: Bulldozer announces which steps already happened for each year, defaults redo prompts to `no`, and only falls back into the natural flow for the missing steps.
+- The processing/rename pass is now part of that rerun state too, so yearly reruns can explicitly redo file organization before regenerating the report, torrent, upload, or client injection.
+- The normal rerun UX now collapses that into a single per-year choice: `skip`, `redo_all`, or `select`, so you are not forced through five separate yes/no questions just to rerun one year.
+- If a saved yearly split state exists but some year folders are missing from the staging root, Bulldozer now detects that mismatch up front and offers to rebuild the missing yearly folders from the source folder instead of silently queuing only the one remaining year.
+- qBittorrent presence checks now use the torrent infohash, so reruns can tell you when a tracker torrent is already in the client instead of blindly reinjecting it.
+- The Unwalled title helper now formats current incomplete same-year slices as `YYYY Month - Month YYYY`, for example `Wine About It [2026 January - March 2026/M4A - 192kbps]`.
+- Audio filename normalization now prefers sortable date-first names with no brackets, for example `2018-11-30 JIBO IS DEAD!!.mp3` or `2018-12-21 Ep. 01 - Bent iPad Pros.mp3`, which aligns better with Unwalled's broadcast-order sorting expectations.
+- Legacy `Ep.` numbers on unique-date files are stripped during normalization, so reruns converge back to plain `YYYY-MM-DD Title.ext` unless multiple episodes actually share the same broadcast date.
 
 ## Upgrading
 
@@ -117,6 +187,8 @@ chmod +x bulldozer
 - `--before`: Will only keep episodes released before <input> in the feed (YYYY-MM-DD).
 - `--latest-episode-only`: Will only keep the newest episode in the feed.
 - `--threads`: Overrides the setting in config.yaml for the number of threads podcast-dl uses.
+- `--upload`: Runs the configured upload backend after torrent creation.
+- `--upload-dry-run`: Validates auth, title, keywords, images, and the prepared UNIT3D payload without submitting.
 
 ## Running With Docker
 

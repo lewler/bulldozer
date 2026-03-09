@@ -10,6 +10,9 @@ base_dir: null
 # The temporary name for a new download
 temp_dir_name: temp_download
 
+# Whether bulldozer should propose renaming local folders based on date heuristics
+rename_folder: true
+
 # Whether to include metadata in the upload
 include_metadata: true
 
@@ -41,10 +44,10 @@ tracker_source: null
 dupecheck: false
 
 # The API key to access the tracker
-api_key: andthisismyapikey
+api_key: null
 
 # The URL to check for duplicates
-dupecheck_url: https://tracker.com/api/torrents/filter
+dupecheck_url: null
 
 # How the RSS feed should be censored. Can be 'delete', 'edit'
 rss_censor_mode: delete
@@ -54,6 +57,43 @@ move:
   active: false # Whether to move the folder
   ask: false # Whether to ask before moving
   path: /home/user/torrents # The path to move the folder to
+
+## Staging settings
+staging:
+  active: false # Whether to always stage local-folder inputs before organizing them
+  ask: false # Whether to ask before creating the staged working tree
+  path: null # Defaults to client.save_path when set, otherwise <source parent>/.bulldozer-staging
+  mode: hardlink # hardlink or copy
+  overwrite: true # Replace an existing staged tree with the same name
+  protect_source_content: true # Skip in-place audio tag rewrites when staging via hardlinks
+
+## Upload settings
+upload:
+  active: false # Whether to offer tracker upload after creating the torrent
+  ask: true # Whether to ask before submitting the prepared upload
+  backend: unit3d_web # Upload backend to use
+  base_url: https://unwalled.cc # Tracker base URL
+  cookie_file: data/cookies/UNW.txt # Netscape cookies.txt export for the tracker session
+  user_agent: Bulldozer uploader
+  require_images: true # Whether cover and banner files are required before submission
+  include_mediainfo: true # Whether to populate the tracker mediainfo field during upload
+  download_uploaded_torrent: true # Download the tracker-returned torrent after success
+  timeout: 60
+
+## Torrent client settings
+client:
+  active: false # Whether to offer torrent-client injection after a successful upload
+  ask: true # Whether to ask before injecting the tracker torrent into the client
+  backend: qbittorrent # Torrent client backend to use
+  url: null # qBittorrent WebUI URL, or set QBITTORRENT_URL/QBT_API_URL in the environment
+  username: null # qBittorrent username, or set QBITTORRENT_USERNAME/QBT_USER in the environment
+  password: null # qBittorrent password, or set QBITTORRENT_PASSWORD/QBT_PASS in the environment
+  save_path: null # Optional qBittorrent save path; defaults to the processed folder's parent
+  category: null # Optional qBittorrent category to set on added torrents
+  tags: [] # Optional qBittorrent tags to set on added torrents
+  paused: false # Add the torrent paused instead of starting immediately
+  skip_checking: false # Skip qBittorrent's recheck when the data already exists
+  timeout: 30
 
 ## Cache settings
 cache:
@@ -65,6 +105,7 @@ cache:
 cutoff: .7
 
 # How should the podcast be split. Possible values are 'last_full_year', 'yearly', 'false'
+# When set to false, interactive upload/client runs can still suggest a split for active multi-year packs.
 split: last_full_year
 
 ## API Settings
@@ -122,7 +163,7 @@ podnews:
 
 ## podcast-dl Settings
 podcast_dl:
-  episode_template: '{{podcast_title}} - {{release_year}}-{{release_month}}-{{release_day}} {{title}}' # The template for the episode name
+  episode_template: '{{release_year}}-{{release_month}}-{{release_day}} {{title}}' # The template for the episode name
   threads: 4 # Number of threads to use for downloading
 
 ## Various settings
@@ -264,10 +305,10 @@ date_format_long: '%B %d %Y'
 ep_nr_at_end_file_pattern: '^(.* - )(\d{4}-\d{2}-\d{2}) (.*?)( - )((Ep\.?|Episode|E)?\s*(\d+))(\.\w+)$'
 
 # The pattern to match the episode file with a number
-numbered_episode_pattern: '^(.* - )(\d{4}-\d{2}-\d{2}) (\d+)\. (.*)(\.\w+)'
+numbered_episode_pattern: '^(\d{4}-\d{2}-\d{2})\s+(Ep\.?|Episode|E|Part)\s*(\d+)\s*-\s*(.*)(\.\w+)$'
 
 # The pattern to match the episode file without a number
-unnumbered_episode_pattern: '^(.*) - )(\d{4}-\d{2}-\d{2}) (.*)(\.\w+)'
+unnumbered_episode_pattern: '^(\d{4}-\d{2}-\d{2})\s+(.*)(\.\w+)$'
 
 # When renaming files, anything matching these patterns will be uppercase
 force_uppercase:
@@ -311,7 +352,7 @@ episode_pattern: '(Ep\.?|Episode|E|Part)(\s*)(\d+)'
 date_pattern: '\b(\d{4}-\d{2}-\d{2})\b'
 
 # How to prefix the episode number if dates are conflicting
-conflicing_dates_replacement: '{prefix} - {date} Ep. {episode} - {suffix}'
+conflicing_dates_replacement: '{date} Ep. {episode} - {title}'
 
 # Gets a clean name from the folder name
 clean_name: '^(.*?)(?=\()'

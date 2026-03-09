@@ -6,8 +6,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from mutagen.easyid3 import EasyID3
 from mutagen.mp4 import MP4
+from .file_analyzer import extract_date_from_filename_text
 from .utils import spinner, titlecase_filename, announce, log, perform_replacements
 from .utils import format_last_date, ask_yes_no, take_input, normalize_string, reset_yes_to_all
+from .utils import choose_option, is_interactive_terminal
 
 class FileOrganizer:
     def __init__(self, podcast, config):
@@ -28,11 +30,25 @@ class FileOrganizer:
         Rename the episode files in the podcast folder.
         """
         ep_nr_at_end_file_pattern = re.compile(self.config.get('ep_nr_at_end_file_pattern', r'^(.* - )(\d{4}-\d{2}-\d{2}) (.*?)( - )((Ep\.?|Episode|E)?\s*(\d+))(\.\w+)$'))
+        file_date_lookup = self.build_file_date_lookup()
         for file_path in Path(self.podcast.folder_path).rglob('*'):
             if file_path.is_file():
-                new_file_path = self.rename_file(file_path, ep_nr_at_end_file_pattern)
+                file_date = file_date_lookup.get(file_path)
+                new_file_path = self.rename_file(file_path, ep_nr_at_end_file_pattern, file_date)
                 if new_file_path != file_path:
                     self.podcast.analyzer.update_file_path(file_path, new_file_path)
+
+    def build_file_date_lookup(self):
+        file_date_lookup = {}
+        analyzer = getattr(self.podcast, "analyzer", None)
+        for mapping_name in ("file_dates", "original_files"):
+            mapping = getattr(analyzer, mapping_name, None) or {}
+            for date_str, file_paths in mapping.items():
+                if not date_str or date_str == "Unknown":
+                    continue
+                for file_path in file_paths:
+                    file_date_lookup[Path(file_path)] = date_str
+        return file_date_lookup
 
     def get_new_name(self, name, file_path):
         """
@@ -70,7 +86,7 @@ class FileOrganizer:
 
         return file_path
 
-    def rename_file(self, file_path, ep_nr_at_end_file_pattern):
+    def rename_file(self, file_path, ep_nr_at_end_file_pattern, file_date=None):
         """
         Rename an individual episode file.
 
@@ -83,12 +99,101 @@ class FileOrganizer:
         file_path.rename(new_path)
         file_path = new_path
 
-        return self.fix_episode_numbering(file_path, ep_nr_at_end_file_pattern)
+        file_path = self.fix_episode_numbering(file_path, ep_nr_at_end_file_pattern)
+        return self.apply_sortable_audio_filename(file_path, file_date)
+
+    def apply_sortable_audio_filename(self, file_path, file_date=None):
+        if file_path.suffix.lower() not in ['.mp3', '.m4a']:
+            return file_path
+
+        file_date = file_date or extract_date_from_filename_text(file_path.name)
+        if not file_date or file_date == "Unknown":
+            return file_path
+
+        episode_number = self.extract_episode_number(file_path.stem)
+        has_date_conflict = self.has_conflicting_date(file_date)
+        clean_title = self.clean_sortable_title(file_path, file_date)
+        if not clean_title:
+            clean_title = file_path.stem
+
+        if episode_number and has_date_conflict:
+            new_filename = f"{file_date} Ep. {episode_number} - {clean_title}{file_path.suffix}"
+        else:
+            new_filename = f"{file_date} {clean_title}{file_path.suffix}"
+
+        if new_filename == file_path.name:
+            return file_path
+
+        new_path = file_path.with_name(new_filename)
+        file_path.rename(new_path)
+        log(f"Renamed '{file_path}' to sortable '{new_path}'", "debug")
+        return new_path
+
+    def extract_episode_number(self, stem):
+        pattern = re.compile(self.config.get('episode_pattern', r'(Ep\.?|Episode|E|Part)(\s*)(\d+)'), re.IGNORECASE)
+        matches = list(pattern.finditer(stem))
+        if not matches:
+            return None
+        return matches[-1].group(3)
+
+    def has_conflicting_date(self, file_date):
+        analyzer = getattr(self.podcast, "analyzer", None)
+        if not analyzer or not file_date or file_date == "Unknown":
+            return False
+
+        for mapping_name in ("file_dates", "original_files"):
+            mapping = getattr(analyzer, mapping_name, None) or {}
+            if len(mapping.get(file_date, [])) > 1:
+                return True
+        return False
+
+    def clean_sortable_title(self, file_path, file_date):
+        title = file_path.stem
+        title = re.sub(r'^\[?\d{4}-\d{2}-\d{2}\]?\s*[-–—:|]?\s*', '', title).strip()
+        title = re.sub(rf'\b{re.escape(file_date)}\b', '', title, flags=re.IGNORECASE)
+
+        podcast_name = getattr(self.podcast, "name", "")
+        if podcast_name:
+            title = re.sub(re.escape(podcast_name), '', title, flags=re.IGNORECASE)
+
+        title = re.sub(
+            r'\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|'
+            r'Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?\s+\d{4}\b',
+            '',
+            title,
+            flags=re.IGNORECASE,
+        )
+        title = re.sub(
+            r'\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|'
+            r'Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b',
+            '',
+            title,
+            flags=re.IGNORECASE,
+        )
+        title = re.sub(self.config.get('episode_pattern', r'(Ep\.?|Episode|E|Part)(\s*)(\d+)'), '', title, flags=re.IGNORECASE)
+        title = re.sub(r'[_]+', ' ', title)
+        title = re.sub(r'\s*-\s*', ' - ', title)
+        title = re.sub(r'\(\s*\)', '', title)
+        title = re.sub(r'\[\s*\]', '', title)
+        title = re.sub(r'^\s*[-–—:|,.()]+\s*', '', title)
+        title = re.sub(r'\s*[-–—:|,.()]+\s*$', '', title)
+        title = re.sub(r'\s{2,}', ' ', title).strip()
+        return title
 
     def update_file_metadata(self):
         """
         Update metadata fields in audio files based on the 'file_metadata_replacements' configuration.
         """
+        staging_runtime = self.config.get('_staging_runtime', {})
+        if (
+            staging_runtime.get('active')
+            and staging_runtime.get('mode') == 'hardlink'
+            and staging_runtime.get('protect_source_content', True)
+        ):
+            announce("Skipping file metadata tag updates to protect the source library during hardlink staging", "info")
+            log("Skipping file metadata updates because hardlink staging is active", "info")
+            return
+
         replacements = self.config.get('file_metadata_replacements', [])
 
         for file_path in Path(self.podcast.folder_path).rglob('*'):
@@ -240,7 +345,7 @@ class FileOrganizer:
         """
         episode_titles = self.podcast.rss.get_episodes()
         episode_titles.reverse()
-        filename_format = self.config.get('conflicing_dates_replacement', '{prefix} - {date} Ep. {episode} - {suffix}')
+        filename_format = self.config.get('conflicing_dates_replacement', '{date} Ep. {episode} - {title}')
         has_trailer = False
         trailer_patterns = self.config.get('trailer_patterns', [])
         trailer_regex = re.compile('|'.join([re.escape(pattern) for pattern in trailer_patterns]), re.IGNORECASE)
@@ -261,10 +366,8 @@ class FileOrganizer:
                     if normalized_title in normalized_filename:
                         padded_episode = str(episode_number).zfill(num_digits)
 
-                        original_title = re.sub(rf'\b{date}\b ', '', file_path.name).strip()
-                        title_parts = re.split(self.config.get('title_split_pattern', r' - (?=[^-]*$)'), original_title)
-                        
-                        new_filename = filename_format.format(prefix=title_parts[0].strip(), date=date, episode=padded_episode, suffix=title_parts[1].strip())
+                        clean_title = self.clean_sortable_title(file_path, date)
+                        new_filename = filename_format.format(date=date, episode=padded_episode, title=clean_title) + file_path.suffix
                         new_path = file_path.with_name(new_filename)
 
                         file_path.rename(new_path)
@@ -281,9 +384,15 @@ class FileOrganizer:
         conflicting_episodes = self.find_files_without_episode_numbers()
         if conflicting_episodes:
             self.assign_episode_numbers_from_rss(conflicting_episodes)
-        pattern = re.compile(self.config.get('numbered_episode_pattern', r'^(.* - )(\d{4}-\d{2}-\d{2}) (\d+)\. (.*)(\.\w+)'))
+        pattern = re.compile(
+            self.config.get(
+                'numbered_episode_pattern',
+                r'^(\d{4}-\d{2}-\d{2})\s+(Ep\.?|Episode|E|Part)\s*(\d+)\s*-\s*(.*)(\.\w+)$',
+            ),
+            re.IGNORECASE,
+        )
     
-        files = Path(self.podcast.folder_path).rglob('*')
+        files = list(Path(self.podcast.folder_path).rglob('*'))
         has_episode_number = any(pattern.match(f.name) for f in files)
         if has_episode_number:
             missing_episode_number = [f for f in files if not pattern.match(f.name)]
@@ -293,23 +402,15 @@ class FileOrganizer:
                         continue
                     episode_number = take_input(f"Episode number for '{f}' (blank skips)")
                     if episode_number:
-                        original_pattern = re.compile(self.config.get('numbered_episode_pattern', r'^(.*) - (\d{4}-\d{2}-\d{2}) (.*?)(\.\w+)'))
-                        match = original_pattern.match(f.name)
-                        
-                        if match:
-                            prefix = match.group(1)
-                            date_part = match.group(2)
-                            title = match.group(3).strip()
-                            extension = match.group(4)
-
-                            new_filename = f"{prefix} - {date_part} {episode_number}. {title}{extension}"
-
-                            folder_path = Path(folder_path)
-
-                            old_filepath = folder_path / f
-                            new_filepath = folder_path / new_filename
-
-                            old_filepath.rename(new_filepath)
+                        date_part = self.build_file_date_lookup().get(f) or extract_date_from_filename_text(f.name)
+                        if not date_part:
+                            log(f"Could not determine date for '{f.name}', skipping manual numbering rename", "warning")
+                            continue
+                        title = self.clean_sortable_title(f, date_part)
+                        new_filename = f"{date_part} Ep. {episode_number} - {title}{f.suffix}"
+                        new_filepath = f.with_name(new_filename)
+                        f.rename(new_filepath)
+                        self.podcast.analyzer.update_file_path(f, new_filepath)
 
     def check_split(self):
         """
@@ -321,20 +422,21 @@ class FileOrganizer:
         """
         if self.podcast.completed:
             log("Skipping split check, podcast is marked as complete", "debug")
-            return
-        
+            return None
+
+        split_years = self.get_split_years()
+        if not split_years:
+            log("Skipping split check, podcast does not span multiple years", "debug")
+            return None
+        start_year, last_year, current_year = split_years
+
         split = self.config.get('split', False)
         if not split:
-            log("Skipping split check, split is false", "debug")
-            return
-
-        start_year = int(self.podcast.analyzer.earliest_year)
-        last_year = int(self.podcast.analyzer.last_episode_date[:4])
-        current_year = datetime.now().year
-
-        if (not start_year or not last_year) or start_year == last_year or last_year != current_year:
-            log("Skipping split check, podcast does not span multiple years", "debug")
-            return
+            split = self.suggest_split_mode(start_year, last_year, current_year)
+            if not split:
+                log("Skipping split check, split is false", "debug")
+                return None
+        self.podcast.split_mode = split
 
         if split == "last_full_year":
             current_folder = self.podcast.folder_path.parent / f"{self.podcast.name} --CURRENT--"
@@ -371,10 +473,13 @@ class FileOrganizer:
             self.duplicate_metadata(current_folder)
             reset_yes_to_all()  # Reset "yes to all" flag after file overwrite section
             announce(f"Podcast split into two folders, current year is in folder appended with --CURRENT--", "info")
+            split_folder_paths = [self.podcast.folder_path, current_folder]
         
         elif split == "yearly":
             new_name = f"{self.podcast.name} ({start_year})"
             new_folder_path = self.podcast.folder_path.parent / new_name
+            if not self.prepare_split_target(new_folder_path):
+                return None
             self.podcast.folder_path.rename(new_folder_path)
             self.podcast.folder_path = new_folder_path
             log(f"Renamed original folder to '{new_name}'", "debug")
@@ -384,14 +489,10 @@ class FileOrganizer:
             for year in range(start_year + 1, last_year + 1):
                 year_folder = self.podcast.folder_path.parent / f"{self.podcast.name} ({year})"
 
-                if year_folder.exists():
-                    log(f"Year folder '{year_folder}' already exists", "debug")
-                    if not ask_yes_no(f"'{year_folder.name}' already exists, proceed with split anyway?"):
-                        log("Skipping split check, user chose not to proceed - folder exists", "debug")
-                        continue
+                if not self.prepare_split_target(year_folder):
+                    continue
 
-                if not year_folder.exists():
-                    year_folder.mkdir()
+                year_folder.mkdir()
 
                 for date, year_list in self.podcast.analyzer.file_dates.items():
                     file_year = int(date[:4])
@@ -416,21 +517,115 @@ class FileOrganizer:
             announce(f"Podcast split into folder for year {start_year}", "info")
 
             reset_yes_to_all()  # Reset "yes to all" flag after file overwrite section
+            split_folder_paths = [self.podcast.folder_path]
             for year in range(start_year + 1, last_year + 1):
                 year_folder = self.podcast.folder_path.parent / f"{self.podcast.name} ({year})"
                 self.duplicate_metadata(year_folder)
                 announce(f"Podcast split into folder for year {year}", "info")
+                split_folder_paths.append(year_folder)
+
+            self.podcast.split_folder_paths = split_folder_paths
+            return split_folder_paths
+
+        self.podcast.split_folder_paths = split_folder_paths
+        return split_folder_paths
+
+    def get_split_years(self):
+        """
+        Return split year context for active multi-year podcasts.
+
+        :return: Tuple of (start_year, last_year, current_year) or None when split is not relevant.
+        """
+        earliest_year = getattr(self.podcast.analyzer, 'earliest_year', None)
+        last_episode_date = getattr(self.podcast.analyzer, 'last_episode_date', None)
+        if not earliest_year or not last_episode_date:
+            return None
+
+        try:
+            start_year = int(earliest_year)
+            last_year = int(last_episode_date[:4])
+        except (TypeError, ValueError):
+            log("Skipping split check, could not parse episode years", "debug")
+            return None
+
+        current_year = datetime.now().year
+        if start_year == last_year or last_year != current_year:
+            return None
+
+        return start_year, last_year, current_year
+
+    def suggest_split_mode(self, start_year, last_year, current_year):
+        """
+        Offer an interactive split suggestion when split is disabled but relevant.
+
+        :param start_year: Earliest year in the analyzed files.
+        :param last_year: Latest year in the analyzed files.
+        :param current_year: The current year.
+        :return: Selected split mode or False when skipped/unavailable.
+        """
+        if not is_interactive_terminal():
+            log("Skipping split suggestion, not running interactively", "debug")
+            return False
+
+        runtime_config = self.config.get('_runtime', {})
+        automation_active = any(
+            [
+                runtime_config.get('upload_requested', False),
+                runtime_config.get('upload_dry_run', False),
+                self.config.get('upload', {}).get('active', False),
+                self.config.get('client', {}).get('active', False),
+            ]
+        )
+        default_mode = "yearly" if automation_active else "skip"
+
+        selection = choose_option(
+            f"'{self.podcast.name}' spans {start_year} to {last_year} and looks active. Would you like to split it?",
+            {
+                "skip": "Keep the folder as-is",
+                "last_full_year": f"Move {current_year} episodes into '{self.podcast.name} --CURRENT--'",
+                "yearly": "Create one folder per year",
+            },
+            default=default_mode,
+        )
+        if selection == "skip":
+            log("Skipping split check, user chose not to split", "debug")
+            return False
+
+        announce(f"Using split mode: {selection}", "info")
+        return selection
     
     def duplicate_metadata(self, new_folder):
         self.podcast.metadata.duplicate(new_folder)
         self.podcast.image.duplicate(new_folder)
         self.podcast.rss.duplicate(new_folder)
 
-    def organize_files(self):
+    def prepare_split_target(self, folder_path):
+        if not folder_path.exists():
+            return True
+
+        log(f"Split target '{folder_path}' already exists", "debug")
+        staging_runtime = self.config.get('_staging_runtime', {})
+        staging_config = self.config.get('staging', {})
+        auto_replace = (
+            staging_config.get('active')
+            and staging_config.get('overwrite', False)
+            and staging_runtime.get('active')
+        )
+        if not auto_replace:
+            if not ask_yes_no(f"'{folder_path.name}' already exists, replace it for this split?"):
+                log("Skipping split target replacement at user request", "debug")
+                return False
+
+        shutil.rmtree(folder_path)
+        log(f"Removed existing split target '{folder_path}'", "debug")
+        return True
+
+    def organize_files(self, skip_split=False):
         """
         Organize the episode files in the podcast folder.
         """
-        self.check_split()
+        if not skip_split:
+            self.check_split()
         self.rename_folder()
         with spinner("Organizing episode files") as spin:
             self.rename_files()
@@ -448,6 +643,9 @@ class FileOrganizer:
         """
         Rename the podcast folder based on the podcast name and date information.
         """
+        if not self.config.get('rename_folder', True):
+            return
+
         if '(' in self.podcast.folder_path.name:
             return
 
