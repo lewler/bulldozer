@@ -136,6 +136,11 @@ These files are not {{ file_format }}:[spoiler][code]{{ differing_file_formats }
 {%- endif %}
 {%- endif %}
 
+{%- if upload_notes %}
+
+{{ upload_notes }}
+{%- endif %}
+
 [size=10]Powered by [url=https://github.com/lewler/bulldozer]Bulldozer[/url] - Breaking Down Walls™ Since 2024[/size]
 [/center]
 

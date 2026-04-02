@@ -12,7 +12,7 @@ from .utils import log, run_command, announce, spinner, get_metadata_directory, 
 from .database import Database
 
 class Podcast:
-    def __init__(self, name, folder_path, config, source_rss_file=None, censor_rss=False, check_duplicates=True, search_term=None, match_titles=None, after_date=None, before_date=None, latest_episode_only=False):
+    def __init__(self, name, folder_path, config, source_rss_file=None, censor_rss=False, check_duplicates=True, search_term=None, match_titles=None, after_date=None, before_date=None, latest_episode_only=False, source_is_local_folder=False):
         """
         Initialize the Podcast with the name, folder path, configuration, and source RSS file.
 
@@ -41,6 +41,7 @@ class Podcast:
         self.after_date = after_date
         self.before_date = before_date
         self.latest_episode_only = latest_episode_only
+        self.source_is_local_folder = source_is_local_folder
         self.rss = Rss(self, source_rss_file, self.config, censor_rss)
         self.image = PodcastImage(self, self.config)
         self.metadata = PodcastMetadata(self, self.config)
@@ -76,7 +77,7 @@ class Podcast:
         self.check_for_duplicates()
         log(f"Duplicate check completed, proceeding with download", "info")
 
-        episode_template = self.config.get("podcast_dl", {}).get('episode_template', "{{podcast_title}} - {{release_year}}-{{release_month}}-{{release_day}} {{title}}")
+        episode_template = self.config.get("podcast_dl", {}).get('episode_template', "{{release_year}}-{{release_month}}-{{release_day}} {{title}}")
         threads = threads_override if threads_override is not None else self.config.get("podcast_dl", {}).get("threads", 1)
         log(f"Using episode template: {episode_template}", "info")
         log(f"Using {threads} thread(s) for download", "info")
@@ -101,12 +102,12 @@ class Podcast:
             exit(1)
         log(f"Episode download completed successfully", "info")
 
-    def organize_files(self):
+    def organize_files(self, skip_split=False):
         """
         Organize the podcast files.
         """
         organizer = FileOrganizer(self, self.config)
-        organizer.organize_files()
+        organizer.organize_files(skip_split=skip_split)
 
     def analyze_files(self):
         """
@@ -120,18 +121,23 @@ class Podcast:
 
         :return: True if there are no duplicates, False otherwise.
         """
-        if self.config.get('api_key') and self.config.get('dupecheck_url'):
-            term = self.search_term if self.search_term else self.name
-            log(f"Checking for duplicates using term: '{term}'", "info")
-            dupe_checker = DupeChecker(term, self.config.get('dupecheck_url'), self.config.get('api_key'))
-            progress = dupe_checker.check_duplicates()
-            if not progress:
-                log("User chose not to continue after duplicate check", "info")
-                self.cleanup_and_exit()
-            else:
-                log("Duplicate check completed, user chose to continue", "info")
-        else:
+        if not self.config.get('dupecheck', False):
+            log("Skipping duplicate check because 'dupecheck' is disabled in the config.", "info")
+            return
+
+        if not self.config.get('api_key') or not self.config.get('dupecheck_url'):
             log("Skipping duplicate check because 'api_key' or 'dupecheck_url' is not set in the config.", "info")
+            return
+
+        term = self.search_term if self.search_term else self.name
+        log(f"Checking for duplicates using term: '{term}'", "info")
+        dupe_checker = DupeChecker(term, self.config.get('dupecheck_url'), self.config.get('api_key'))
+        progress = dupe_checker.check_duplicates()
+        if not progress:
+            log("User chose not to continue after duplicate check", "info")
+            self.cleanup_and_exit()
+        else:
+            log("Duplicate check completed, user chose to continue", "info")
 
     def archive_files(self):
         """
@@ -152,7 +158,13 @@ class Podcast:
         Clean up and exit.
         """
         log("Cleaning up and exiting...", "debug")
-        shutil.rmtree(self.folder_path)
+        staging_runtime = self.config.get('_staging_runtime', {})
+        if self.source_is_local_folder and not staging_runtime.get('active', False):
+            log(f"Skipping cleanup for local folder input {self.folder_path}", "info")
+            exit(1)
+
+        if self.folder_path.exists():
+            shutil.rmtree(self.folder_path)
         exit(1)
 
     def load_from_database(self, refresh=False):

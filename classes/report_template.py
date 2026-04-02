@@ -1,6 +1,27 @@
 # template.py
 from jinja2 import Template
+
 from .utils import log
+
+
+DESCRIPTION_MARKER = "--- Torrent Description ---"
+
+
+def extract_tracker_description(rendered_text):
+    """
+    Extract the tracker description block from a rendered report template.
+
+    Templates can optionally wrap the upload-safe description between two
+    DESCRIPTION_MARKER lines. If the markers are not present, the full rendered
+    template is treated as the description.
+    """
+    if not rendered_text:
+        return ""
+
+    sections = rendered_text.split(DESCRIPTION_MARKER)
+    if len(sections) >= 3:
+        return sections[1].strip("\n")
+    return rendered_text.strip("\n")
 
 class ReportTemplate:
     def __init__(self, podcast, config):
@@ -22,6 +43,8 @@ class ReportTemplate:
         if not self.template:
             log(f"Template {self.template_file} not found. Will only include description.", "warning")
             self.template = Template("{{ description }}")
+        with open("templates/fallback.tpl", "r") as template_file:
+            self.fallback_template = Template(template_file.read())
         with open(f"templates/{self.name_template_file}.tpl", "r") as template_file:
             self.name_template = Template(template_file.read())
         if not self.name_template:
@@ -61,4 +84,13 @@ class ReportTemplate:
         :param data: A dictionary containing key-value pairs that match placeholders in the template.
         :return: A string containing the rendered template.
         """
+        if self.template_file == "default" and not data.get("podchaser") and not data.get("podcastindex"):
+            return self.fallback_template.render(data)
         return self.template.render(data)
+
+    def render_tracker_description(self, data):
+        """
+        Render the configured template and return only the tracker description
+        section when markers are present.
+        """
+        return extract_tracker_description(self.render(data))

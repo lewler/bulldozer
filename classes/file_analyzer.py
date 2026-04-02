@@ -15,6 +15,42 @@ from dateutil.parser import parse  # Import dateutil parser
 from mutagen.id3 import TXXX  # Import TXXX for accessing custom tags
 from .utils import spinner, log
 
+
+FILENAME_DATE_PATTERNS = [
+    re.compile(r'\b(\d{4}-\d{2}-\d{2})\b'),
+    re.compile(
+        r'\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|'
+        r'Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,)?\s+\d{4})\b',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r'\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|'
+        r'Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4})\b',
+        re.IGNORECASE,
+    ),
+]
+
+
+def extract_date_from_filename_text(filename):
+    stem = getattr(filename, "stem", None) or str(filename)
+    stem = stem.replace("_", " ")
+
+    for pattern in FILENAME_DATE_PATTERNS:
+        match = pattern.search(stem)
+        if not match:
+            continue
+        date_str = match.group(1)
+        try:
+            if re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+            else:
+                normalized = re.sub(r'(\d)(st|nd|rd|th)\b', r'\1', date_str, flags=re.IGNORECASE)
+                date_obj = parse(normalized)
+            return date_obj.strftime('%Y-%m-%d')
+        except (ValueError, TypeError):
+            continue
+    return None
+
 class FileAnalyzer:
     def __init__(self, podcast, config):
         """
@@ -268,10 +304,9 @@ class FileAnalyzer:
                 date_str = "Unknown"
         else:
             # Try to extract date from file name
-            date_pattern = re.compile(r'\b(\d{4}-\d{2}-\d{2})\b')
-            match = date_pattern.search(file_path.name)
-            if match:
-                date_str = match.group(1)
+            filename_date = extract_date_from_filename_text(file_path.name)
+            if filename_date:
+                date_str = filename_date
                 try:
                     date_obj = datetime.strptime(date_str, '%Y-%m-%d')
                     year = date_obj.year

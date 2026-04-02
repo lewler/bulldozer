@@ -1,6 +1,8 @@
 config.yaml
 podcasts.db
 .python-version
+UNW.txt
 
 logs/
 __pycache__/
+.venv/

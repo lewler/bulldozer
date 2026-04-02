@@ -10,6 +10,7 @@ import gzip
 import zlib
 import platform
 import os
+import sys
 from datetime import datetime
 from contextlib import contextmanager
 from pathlib import Path
@@ -281,7 +282,7 @@ def announce(text, type=None):
         prepend = "🎉"
     print(f"{prepend}{text}")
 
-def ask_yes_no(question, allow_all=False):
+def ask_yes_no(question, allow_all=False, default_yes=False):
     """
     Ask a yes/no question.
 
@@ -297,10 +298,15 @@ def ask_yes_no(question, allow_all=False):
         log(f"Auto-answering 'yes' to file overwrite prompt (allow_all=True)", "debug")
         return True
     
-    prompt_suffix = " (y/N/A for all)" if allow_all else " (y/N)"
+    if allow_all:
+        prompt_suffix = " (Y/n/A for all)" if default_yes else " (y/N/A for all)"
+    else:
+        prompt_suffix = " (Y/n)" if default_yes else " (y/N)"
     
     while True:
         response = input(f"❓{question}{prompt_suffix}: ").strip().lower()
+        if response == '':
+            return bool(default_yes)
         if response == 'y':
             return True
         elif response == 'a' and allow_all:
@@ -309,20 +315,106 @@ def ask_yes_no(question, allow_all=False):
             return True
         else:
             return False
-        
-def take_input(prompt):
+
+def is_interactive_terminal():
+    """
+    Check if Bulldozer is running in an interactive terminal session.
+
+    :return: True when both stdin and stdout are TTYs, otherwise False.
+    """
+    stdin = getattr(sys, "stdin", None)
+    stdout = getattr(sys, "stdout", None)
+    return bool(stdin and stdout and stdin.isatty() and stdout.isatty())
+
+def choose_option(question, options, default=None):
+    """
+    Ask the user to choose one option from a dict of value -> label.
+
+    :param question: The question to ask.
+    :param options: Mapping of option value to label.
+    :param default: Default option value to use when the user presses enter.
+    :return: The selected option value as a string.
+    """
+    if not options:
+        raise ValueError(f"No options available for: {question}")
+
+    announce(question, "info")
+    for option_value, label in options.items():
+        suffix = " [default]" if default is not None and str(option_value) == str(default) else ""
+        print(f"  {option_value}: {label}{suffix}")
+
+    while True:
+        prompt_suffix = f" [{default}]" if default is not None else ""
+        response = input(f"❓Enter choice{prompt_suffix}: ").strip()
+        if response == "" and default is not None:
+            return str(default)
+        if response in {str(option) for option in options}:
+            return str(response)
+        announce("Please enter one of the listed option IDs.", "warning")
+
+def ask_yes_no_default(question, default=False):
+    """
+    Ask a yes/no question with an explicit default.
+
+    :param question: The question to ask.
+    :param default: The default boolean value when the user presses enter.
+    :return: True if the answer is yes, False otherwise.
+    """
+    prompt_suffix = " (Y/n)" if default else " (y/N)"
+
+    while True:
+        response = input(f"❓{question}{prompt_suffix}: ").strip().lower()
+        if response == "":
+            return default
+        if response == "y":
+            return True
+        if response == "n":
+            return False
+        announce("Please answer y or n.", "warning")
+
+def take_input(prompt, default=None):
     """
     Take input from the user.
 
     :param prompt: The prompt to display.
+    :param default: Optional default value when the user presses enter.
     :return: The user's input.
     """
     while True:
-        response = input(f"❓{prompt}: ").strip()
+        prompt_suffix = f" [{default}]" if default not in (None, "") else ""
+        response = input(f"❓{prompt}{prompt_suffix}: ").strip()
         if response == '':
+            if default is not None:
+                return str(default)
             return None
         else:
             return response
+
+def choose_option(question, options, default=None):
+    """
+    Ask the user to choose one option from a dict of value -> label.
+
+    :param question: The question to ask.
+    :param options: Mapping of option value to label.
+    :param default: Default option value to use when the user presses enter.
+    :return: The selected option value as a string.
+    """
+    if not options:
+        raise ValueError(f"No options available for: {question}")
+
+    announce(question, "info")
+    for option_value, label in options.items():
+        suffix = " [default]" if default is not None and str(option_value) == str(default) else ""
+        print(f"  {option_value}: {label}{suffix}")
+
+    while True:
+        prompt_suffix = f" [{default}]" if default is not None else ""
+        response = input(f"❓Enter choice{prompt_suffix}: ").strip()
+        if response == "" and default is not None:
+            return str(default)
+        if response in {str(option) for option in options}:
+            return str(response)
+        announce("Please enter one of the listed option IDs.", "warning")
         
 def get_metadata_directory(folder_path, config):
     """
